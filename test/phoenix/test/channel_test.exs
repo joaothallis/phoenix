@@ -172,7 +172,7 @@ defmodule Phoenix.Test.ChannelTest do
 
   @endpoint Endpoint
   @moduletag :capture_log
-  use Phoenix.ChannelTest
+  import Phoenix.ChannelTest
 
   setup_all do
     start_supervised! @endpoint
@@ -228,6 +228,9 @@ defmodule Phoenix.Test.ChannelTest do
 
     {:links, links} = Process.info(self(), :links)
     assert client.channel_pid in links
+
+    {:dictionary, dictionary} = Process.info(client.channel_pid, :dictionary)
+    assert dictionary[:"$callers"] == [self()]
   end
 
   test "join/3 with error reply" do

@@ -9,6 +9,8 @@ defmodule Phoenix.Endpoint.RenderErrors do
   #
   #   * `:view` - the name of the view we render templates against
   #   * `:format` - the format to use when none is available from the request
+  #   * `:accepts` - list of accepted formats errors will be rendered for
+  #   * `:log` - the `t:Logger.level/0` or `false` to disable logging rendered errors
   #
   @moduledoc false
 
@@ -44,7 +46,7 @@ defmodule Phoenix.Endpoint.RenderErrors do
             unquote(__MODULE__).__catch__(conn, kind, reason, stack, @phoenix_render_errors)
         catch
           kind, reason ->
-            stack = System.stacktrace()
+            stack = __STACKTRACE__
             unquote(__MODULE__).__catch__(conn, kind, reason, stack, @phoenix_render_errors)
         end
       end
@@ -70,7 +72,7 @@ defmodule Phoenix.Endpoint.RenderErrors do
     status = status(kind, reason)
     conn = error_conn(conn, kind, reason)
     start = System.monotonic_time()
-    metadata = %{status: status, kind: kind, reason: reason, stacktrace: stack, log: level}
+    metadata = %{conn: conn, status: status, kind: kind, reason: reason, stacktrace: stack, log: level}
 
     try do
       render(conn, status, kind, reason, stack, opts)
@@ -101,13 +103,14 @@ defmodule Phoenix.Endpoint.RenderErrors do
       |> maybe_fetch_query_params()
       |> maybe_fetch_format(opts)
       |> Plug.Conn.put_status(status)
+      |> Controller.put_root_layout(opts[:root_layout] || false)
       |> Controller.put_layout(opts[:layout] || false)
       |> Controller.put_view(view)
 
     reason = Exception.normalize(kind, reason, stack)
     format = Controller.get_format(conn)
     template = "#{conn.status}.#{format}"
-    assigns = %{kind: kind, reason: reason, stack: stack}
+    assigns = %{kind: kind, reason: reason, stack: stack, status: conn.status}
 
     conn
     |> Controller.put_view(view)

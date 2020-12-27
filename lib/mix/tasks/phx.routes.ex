@@ -30,7 +30,7 @@ defmodule Mix.Tasks.Phx.Routes do
     Mix.Task.run("compile", args)
 
     {router_mod, opts} =
-      case OptionParser.parse(args, switches: [enpdoint: :string, router: :string]) do
+      case OptionParser.parse(args, switches: [endpoint: :string, router: :string]) do
         {opts, [passed_router], _} -> {router(passed_router, base), opts}
         {opts, [], _} -> {router(opts[:router], base), opts}
       end
@@ -38,7 +38,7 @@ defmodule Mix.Tasks.Phx.Routes do
 
     router_mod
     |> ConsoleFormatter.format(endpoint(opts[:endpoint], base))
-    |> Mix.shell.info()
+    |> Mix.shell().info()
   end
 
   defp endpoint(nil, base) do

@@ -83,6 +83,31 @@ defmodule Phoenix.Controller.ControllerTest do
     end
   end
 
+  test "put_root_layout/2 and root_layout/1" do
+    conn = conn(:get, "/")
+    assert root_layout(conn) == false
+
+    conn = put_root_layout(conn, {AppView, "root.html"})
+    assert root_layout(conn) == {AppView, "root.html"}
+
+    conn = put_root_layout(conn, "bare.html")
+    assert root_layout(conn) == {AppView, "bare.html"}
+
+    conn = put_root_layout(conn, :print)
+    assert root_layout(conn) == {AppView, :print}
+
+    conn = put_root_layout(conn, false)
+    assert root_layout(conn) == false
+
+    assert_raise RuntimeError, fn ->
+      put_root_layout(conn, "print")
+    end
+
+    assert_raise Plug.Conn.AlreadySentError, fn ->
+      put_layout sent_conn(), {AppView, :print}
+    end
+  end
+
   test "put_new_layout/2" do
     conn = put_new_layout(conn(:get, "/"), false)
     assert layout(conn) == false
@@ -544,7 +569,7 @@ defmodule Phoenix.Controller.ControllerTest do
     end
 
     test "keeps structs intact" do
-      conn = conn(:get, "/", %{"foo" => %{"bar" => %Plug.Upload{}}})
+      conn = conn(:post, "/", %{"foo" => %{"bar" => %Plug.Upload{}}})
       |> fetch_query_params
       |> scrub_params("foo")
 
@@ -554,7 +579,7 @@ defmodule Phoenix.Controller.ControllerTest do
 
   test "protect_from_forgery/2 sets token" do
     conn(:get, "/")
-    |> with_session
+    |> init_test_session(%{})
     |> protect_from_forgery([])
 
     assert is_binary get_csrf_token()
@@ -585,7 +610,7 @@ defmodule Phoenix.Controller.ControllerTest do
     assert Phoenix.Controller.__view__(MyApp.Admin.UserController) == MyApp.Admin.UserView
   end
 
-  test "__layout__ returns the layout modoule based on controller module" do
+  test "__layout__ returns the layout module based on controller module" do
     assert Phoenix.Controller.__layout__(UserController, []) ==
            LayoutView
     assert Phoenix.Controller.__layout__(MyApp.UserController, []) ==
@@ -616,6 +641,9 @@ defmodule Phoenix.Controller.ControllerTest do
 
       conn = build_conn_for_path("/foo?one=1&two=2")
       assert current_path(conn) == "/foo?one=1&two=2"
+
+      conn = build_conn_for_path("/foo//bar/")
+      assert current_path(conn) == "/foo/bar"
     end
 
     test "current_path/2 allows custom query params" do

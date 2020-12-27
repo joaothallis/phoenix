@@ -40,7 +40,7 @@ defmodule Mix.Tasks.Phx.Gen.Cert do
     * `--name` (`-n`): the Common Name value in certificate's subject
       (default: "#{@default_name}")
 
-  Requires OTP 20 or later.
+  Requires OTP 21.3 or later.
   """
 
   use Mix.Task
@@ -49,7 +49,7 @@ defmodule Mix.Tasks.Phx.Gen.Cert do
   @doc false
   def run(all_args) do
     if Mix.Project.umbrella?() do
-      Mix.raise("mix phx.gen.cert can only be run inside an application directory")
+      Mix.raise("mix phx.gen.cert must be invoked from within your *_web application root directory")
     end
 
     {opts, args} =

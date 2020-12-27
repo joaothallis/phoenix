@@ -41,15 +41,18 @@ defmodule Phoenix.Socket.Transport do
   `c:handle_in/2` on the socket. For each informational message the
   transport receives, it should call `c:handle_info/2` on the socket.
 
+  Transports can optionally implement `c:handle_control/2` for handling
+  control frames such as `:ping` and `:pong`.
+
   On termination, `c:terminate/2` must be called. A special atom with
   reason `:closed` can be used to specify that the client terminated
   the connection.
 
   ## Example
 
-  Here is a simple pong socket implementation:
+  Here is a simple echo socket implementation:
 
-      defmodule PingSocket do
+      defmodule EchoSocket do
         @behaviour Phoenix.Socket.Transport
 
         def child_spec(opts) do
@@ -68,8 +71,8 @@ defmodule Phoenix.Socket.Transport do
           {:ok, state}
         end
 
-        def handle_in({"ping", _opts}, state) do
-          {:reply, :ok, {:text, "pong"}, state}
+        def handle_in({text, _opts}, state) do
+          {:reply, :ok, {:text, text}, state}
         end
 
         def handle_info(_, state) do
@@ -83,7 +86,7 @@ defmodule Phoenix.Socket.Transport do
 
   It can be mounted in your endpoint like any other socket:
 
-      socket "/socket", PingSocket, websocket: true, longpoll: true
+      socket "/socket", EchoSocket, websocket: true, longpoll: true
 
   You can now interact with the socket under `/socket/websocket`
   and `/socket/longpoll`.
@@ -178,6 +181,29 @@ defmodule Phoenix.Socket.Transport do
               | {:stop, reason :: term, state}
 
   @doc """
+  Handles incoming control frames.
+
+  The message is represented as `{payload, options}`. It must
+  return one of:
+
+    * `{:ok, state}` - continues the socket with no reply
+    * `{:reply, status, reply, state}` - continues the socket with reply
+    * `{:stop, reason, state}` - stops the socket
+
+  Control frames only supported when using websockets.
+
+  The `options` contains an `opcode` key, this will be either `:ping` or
+  `:pong`.
+
+  If a control frame doesn't have a payload, then the payload value
+  will be `nil`.
+  """
+  @callback handle_control({message :: term, opts :: keyword}, state) ::
+              {:ok, state}
+              | {:reply, :ok | :error, {opcode :: atom, message :: term}, state}
+              | {:stop, reason :: term, state}
+
+  @doc """
   Handles info messages.
 
   The message is a term. It must return one of:
@@ -205,6 +231,8 @@ defmodule Phoenix.Socket.Transport do
   """
   @callback terminate(reason :: term, state) :: :ok
 
+  @optional_callbacks handle_control: 2
+
   require Logger
 
   @doc false
@@ -212,14 +240,15 @@ defmodule Phoenix.Socket.Transport do
     do: module.default_config()
 
   def load_config(config, module),
-    do: module.default_config() |> Keyword.merge(config) |> validate_config()
+    do: module.default_config() |> Keyword.merge(config) |> load_config()
 
-  defp validate_config(config) do
+  @doc false
+  def load_config(config) do
     {connect_info, config} = Keyword.pop(config, :connect_info, [])
 
     connect_info =
       Enum.map(connect_info, fn
-        key when key in [:peer_data, :uri, :x_headers] ->
+        key when key in [:peer_data, :trace_context_headers, :uri, :user_agent, :x_headers] ->
           key
 
         {:session, session} ->
@@ -230,18 +259,22 @@ defmodule Phoenix.Socket.Transport do
 
         other ->
           raise ArgumentError,
-                ":connect_info keys are expected to be one of :peer_data, :x_headers, :uri, or {:session, config}, " <>
+                ":connect_info keys are expected to be one of :peer_data, :trace_context_headers, :x_headers, :uri, or {:session, config}, " <>
                   "optionally followed by custom keyword pairs, got: #{inspect(other)}"
       end)
 
     [connect_info: connect_info] ++ config
   end
 
-  defp init_session(session) do
-    key = Keyword.fetch!(session, :key)
-    store = Plug.Session.Store.get(Keyword.fetch!(session, :store))
-    init = store.init(Keyword.drop(session, [:store, :key]))
+  defp init_session(session_config) when is_list(session_config) do
+    key = Keyword.fetch!(session_config, :key)
+    store = Plug.Session.Store.get(Keyword.fetch!(session_config, :store))
+    init = store.init(Keyword.drop(session_config, [:store, :key]))
     {key, store, init}
+  end
+
+  defp init_session({_, _, _} = mfa)  do
+    {:mfa, mfa}
   end
 
   @doc """
@@ -354,6 +387,41 @@ defmodule Phoenix.Socket.Transport do
   end
 
   @doc """
+  Checks the Websocket subprotocols request header against the allowed subprotocols.
+
+  Should be called by transports before connecting when appropriate.
+  If the sec-websocket-protocol header matches the allowed subprotocols,
+  it will put sec-websocket-protocol response header and return the given connection.
+  If no sec-websocket-protocol header was sent it will return the given connection.
+
+  Otherwise a 403 Forbidden response will be sent and the connection halted.
+  It is a noop if the connection has been halted.
+  """
+  def check_subprotocols(conn, subprotocols)
+
+  def check_subprotocols(%Plug.Conn{halted: true} = conn, _subprotocols), do: conn
+  def check_subprotocols(conn, nil), do: conn
+
+  def check_subprotocols(conn, subprotocols) when is_list(subprotocols) do
+    case Plug.Conn.get_req_header(conn, "sec-websocket-protocol") do
+      [] ->
+        conn
+
+      [subprotocols_header | _] ->
+        request_subprotocols = subprotocols_header |> Plug.Conn.Utils.list()
+        subprotocol = Enum.find(subprotocols, fn elem -> Enum.find(request_subprotocols, &(&1 == elem)) end)
+
+        if subprotocol do
+          Plug.Conn.put_resp_header(conn, "sec-websocket-protocol", subprotocol)
+        else
+          subprotocols_error_response(conn, subprotocols)
+        end
+    end
+  end
+
+  def check_subprotocols(conn, subprotocols), do: subprotocols_error_response(conn, subprotocols)
+
+  @doc """
   Extracts connection information from `conn` and returns a map.
 
   Keys are retrieved from the optional transport option `:connect_info`.
@@ -363,8 +431,14 @@ defmodule Phoenix.Socket.Transport do
   The supported keys are:
 
     * `:peer_data` - the result of `Plug.Conn.get_peer_data/1`
+
+    * `:trace_context_headers` - a list of all trace context headers
+
     * `:x_headers` - a list of all request headers that have an "x-" prefix
+
     * `:uri` - a `%URI{}` derived from the conn
+
+    * `:user_agent` - the value of the "user-agent" request header
 
   """
   def connect_info(conn, endpoint, keys) do
@@ -373,30 +447,82 @@ defmodule Phoenix.Socket.Transport do
         :peer_data ->
           {:peer_data, Plug.Conn.get_peer_data(conn)}
 
+        :trace_context_headers ->
+          {:trace_context_headers, fetch_trace_context_headers(conn)}
+
         :x_headers ->
           {:x_headers, fetch_x_headers(conn)}
 
         :uri ->
           {:uri, fetch_uri(conn)}
 
-        {:session, {key, store, store_config}} ->
-          conn = Plug.Conn.fetch_cookies(conn)
+        :user_agent ->
+          {:user_agent, fetch_user_agent(conn)}
 
-          with csrf_token when is_binary(csrf_token) <- conn.params["_csrf_token"],
-               cookie when is_binary(cookie) <- conn.cookies[key],
-               conn = put_in(conn.secret_key_base, endpoint.config(:secret_key_base)),
-               {_, session} <- store.get(conn, cookie, store_config),
-               csrf_state when is_binary(csrf_state) <- Plug.CSRFProtection.dump_state_from_session(session["_csrf_token"]),
-               true <- Plug.CSRFProtection.valid_state_and_csrf_token?(csrf_state, csrf_token) do
-            {:session, session}
-          else
-            _ -> {:session, nil}
-          end
+        {:session, session} ->
+          {:session, connect_session(conn, endpoint, session)}
 
         {key, val} ->
           {key, val}
       end
     end
+  end
+
+  defp connect_session(conn, endpoint, {key, store, store_config}) do
+    conn = Plug.Conn.fetch_cookies(conn)
+
+    with csrf_token when is_binary(csrf_token) <- conn.params["_csrf_token"],
+         cookie when is_binary(cookie) <- conn.cookies[key],
+         conn = put_in(conn.secret_key_base, endpoint.config(:secret_key_base)),
+         {_, session} <- store.get(conn, cookie, store_config),
+         csrf_state when is_binary(csrf_state) <- Plug.CSRFProtection.dump_state_from_session(session["_csrf_token"]),
+         true <- Plug.CSRFProtection.valid_state_and_csrf_token?(csrf_state, csrf_token) do
+      session
+    else
+      _ -> nil
+    end
+  end
+
+  defp connect_session(conn, endpoint, {:mfa, {module, function, args}}) do
+    case apply(module, function, args) do
+      session_config when is_list(session_config) ->
+        connect_session(conn, endpoint, init_session(session_config))
+
+      other ->
+        raise ArgumentError,
+          "the MFA given to `session_config` must return a keyword list, got: #{inspect other}"
+    end
+  end
+
+  defp subprotocols_error_response(conn, subprotocols) do
+    import Plug.Conn
+    request_headers = get_req_header(conn, "sec-websocket-protocol")
+
+    Logger.error """
+    Could not check Websocket subprotocols for Phoenix.Socket transport.
+
+    Subprotocols of the request: #{inspect(request_headers)}
+    Configured supported subprotocols: #{inspect(subprotocols)}
+
+    This happens when you are attempting a socket connection to
+    a different subprotocols than the one configured in your endpoint
+    or when you incorrectly configured supported subprotocols.
+
+    To fix this issue, you may either:
+
+      1. update websocket: [subprotocols: [..]] to your actual subprotocols
+         in your endpoint socket configuration.
+
+      2. check the correctness of the `sec-websocket-protocol` request header
+         sent from the client.
+
+      3. remove `websocket` option from your endpoint socket configuration
+         if you don't use Websocket subprotocols.
+    """
+
+    resp(conn, :forbidden, "")
+    |> send_resp()
+    |> halt()
   end
 
   defp fetch_x_headers(conn) do
@@ -405,15 +531,27 @@ defmodule Phoenix.Socket.Transport do
         do: pair
   end
 
-  defp fetch_uri(%{host: host, scheme: scheme, query_string: query_string, port: port, request_path: request_path}) do
+  defp fetch_trace_context_headers(conn) do
+    for {header, _} = pair <- conn.req_headers,
+      header in ["traceparent", "tracestate"],
+      do: pair
+  end
+
+  defp fetch_uri(conn) do
     %URI{
-      scheme: to_string(scheme),
-      query: query_string,
-      port: port,
-      host: host,
-      authority: host,
-      path: request_path,
+      scheme: to_string(conn.scheme),
+      query: conn.query_string,
+      port: conn.port,
+      host: conn.host,
+      authority: conn.host,
+      path: conn.request_path
     }
+  end
+
+  defp fetch_user_agent(conn) do
+    with {_, value} <- List.keyfind(conn.req_headers, "user-agent", 0) do
+      value
+    end
   end
 
   defp check_origin_config(handler, endpoint, opts) do

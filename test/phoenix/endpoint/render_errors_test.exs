@@ -7,23 +7,23 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
   import ExUnit.CaptureLog
   view = __MODULE__
 
-  def render("app.html", %{view_template: view_template} = assigns) do
-    "Layout: " <> render(view_template, assigns)
+  def render("app.html", assigns) do
+    "Layout: " <> assigns.inner_content
   end
 
-  def render("404.html", %{kind: kind, reason: _reason, stack: _stack, conn: conn}) do
+  def render("404.html", %{kind: kind, reason: _reason, stack: _stack, status: 404, conn: conn}) do
     "Got 404 from #{kind} with #{conn.method}"
   end
 
-  def render("404.json", %{kind: kind, reason: _reason, stack: _stack, conn: conn}) do
+  def render("404.json", %{kind: kind, reason: _reason, stack: _stack, status: 404, conn: conn}) do
     %{error: "Got 404 from #{kind} with #{conn.method}"}
   end
 
-  def render("415.html", %{kind: kind, reason: _reason, stack: _stack, conn: conn}) do
+  def render("415.html", %{kind: kind, reason: _reason, stack: _stack, status: 415, conn: conn}) do
     "Got 415 from #{kind} with #{conn.method}"
   end
 
-  def render("500.html", %{kind: kind, reason: _reason, stack: _stack, conn: conn}) do
+  def render("500.html", %{kind: kind, reason: _reason, stack: _stack, status: 500, conn: conn}) do
     "Got 500 from #{kind} with #{conn.method}"
   end
 
@@ -53,8 +53,14 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
         try do
           raise "oops"
         rescue
-          _ -> System.stacktrace()
+          _ -> __STACKTRACE__
         end
+
+      # Those are always ignored and must be explicitly opted-in.
+      conn =
+        conn
+        |> Phoenix.Controller.put_layout({Unknown, "layout"})
+        |> Phoenix.Controller.put_root_layout({Unknown, "root"})
 
       reason = ArgumentError.exception("oops")
       raise Plug.Conn.WrapperError, conn: conn, kind: :error, stack: stack, reason: reason
@@ -146,22 +152,21 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
   test "does not log converted errors if response already sent" do
     conn = put_endpoint(conn(:get, "/"))
 
-    assert capture_log(fn ->
+    try do
       try do
-        try do
-          Plug.Conn.send_resp(conn, 200, "hello")
-          throw :hello
-        catch
-          kind, reason ->
-            stack = System.stacktrace()
-            opts = [view: __MODULE__, accepts: ~w(html)]
-            Phoenix.Endpoint.RenderErrors.__catch__(conn, kind, reason, stack, opts)
-        else
-          _ -> flunk "function should have failed"
-        end
-      catch :throw, :hello -> :ok
+        Plug.Conn.send_resp(conn, 200, "hello")
+        throw :hello
+      catch
+        kind, reason ->
+          stack = __STACKTRACE__
+          opts = [view: __MODULE__, accepts: ~w(html)]
+          Phoenix.Endpoint.RenderErrors.__catch__(conn, kind, reason, stack, opts)
+      else
+        _ -> flunk "function should have failed"
       end
-    end) == ""
+    catch
+      :throw, :hello -> :ok
+    end
   end
 
   defp put_endpoint(conn) do
@@ -179,7 +184,7 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
         func.()
       catch
         kind, reason ->
-          stack = System.stacktrace()
+          stack = __STACKTRACE__
           Phoenix.Endpoint.RenderErrors.__catch__(conn, kind, reason, stack, opts)
       else
         _ -> flunk "function should have failed"
@@ -246,6 +251,14 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
 
   test "exception page with layout" do
     body = assert_render(500, conn(:get, "/"), [layout: {__MODULE__, :app}], fn ->
+      throw :hello
+    end)
+
+    assert body == "Layout: Got 500 from throw with GET"
+  end
+
+  test "exception page with root layout" do
+    body = assert_render(500, conn(:get, "/"), [root_layout: {__MODULE__, :app}], fn ->
       throw :hello
     end)
 

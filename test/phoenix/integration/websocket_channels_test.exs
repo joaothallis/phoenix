@@ -50,6 +50,11 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
       raise "boom"
     end
 
+    def handle_in("binary_event", {:binary, data}, socket) do
+      push(socket, "binary_event", {:binary, <<0, 1>>})
+      {:reply, {:ok, {:binary, <<data::binary, 3, 4>>}}, socket}
+    end
+
     def handle_out("new_msg", payload, socket) do
       push socket, "new_msg", Map.put(payload, "transport", inspect(socket.transport))
       {:noreply, socket}
@@ -64,20 +69,24 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
   defmodule CustomChannel do
     use GenServer, restart: :temporary
 
-    def start_link(triplet) do
-      GenServer.start_link(__MODULE__, triplet)
+    def start_link(from) do
+      GenServer.start_link(__MODULE__, from)
     end
 
-    def init({payload, from, socket}) do
+    def init({_, _}) do
+      {:ok, :init}
+    end
+
+    def handle_info({Phoenix.Channel, payload, from, socket}, :init) do
       case payload["action"] do
         "ok" ->
           GenServer.reply(from, {:ok, %{"action" => "ok"}})
-          {:ok, socket}
+          {:noreply, socket}
 
         "ignore" ->
           GenServer.reply(from, {:error, %{"action" => "ignore"}})
           send(self(), :stop)
-          {:ok, socket}
+          {:noreply, socket}
 
         "error" ->
           raise "oops"
@@ -106,6 +115,7 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
       connect_info =
         connect_info
         |> Map.update!(:peer_data, &Map.put(&1, :address, address))
+        |> Map.update!(:trace_context_headers, &Map.new/1)
         |> Map.update!(:uri, &Map.from_struct/1)
         |> Map.update!(:x_headers, &Map.new/1)
 
@@ -132,6 +142,10 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
       :error
     end
 
+    def connect(%{"ratelimit" => "true"}, _socket) do
+      {:error, :rate_limit}
+    end
+
     def connect(params, socket) do
       unless params["logging"] == "enabled", do: Logger.disable(self())
       {:ok, assign(socket, :user_id, params["user_id"])}
@@ -140,6 +154,8 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
     def id(socket) do
       if id = socket.assigns.user_id, do: "user_sockets:#{id}"
     end
+
+    def handle_error(conn, :rate_limit), do: Plug.Conn.send_resp(conn, 429, "Too many requests")
   end
 
   defmodule Endpoint do
@@ -152,7 +168,8 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
     socket "/ws", UserSocket,
       websocket: [
         check_origin: ["//example.com"],
-        timeout: 200
+        timeout: 200,
+        error_handler: {UserSocket, :handle_error, []}
       ]
 
     socket "/ws/admin", UserSocket,
@@ -165,7 +182,15 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
       websocket: [
         check_origin: ["//example.com"],
         timeout: 200,
-        connect_info: [:x_headers, :peer_data, :uri, session: @session_config, signing_salt: "salt"]
+        connect_info: [
+          :trace_context_headers,
+          :x_headers,
+          :peer_data,
+          :uri,
+          :user_agent,
+          session: @session_config,
+          signing_salt: "salt"
+        ]
       ]
 
     plug Plug.Session, @session_config
@@ -188,7 +213,7 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
 
   @endpoint Endpoint
 
-  for {serializer, vsn, join_ref} <- [{V1.JSONSerializer, "1.0.0", nil}, {V2.JSONSerializer, "2.0.0", 11}] do
+  for {serializer, vsn, join_ref} <- [{V1.JSONSerializer, "1.0.0", nil}, {V2.JSONSerializer, "2.0.0", "11"}] do
     @serializer serializer
     @vsn vsn
     @vsn_path "ws://127.0.0.1:#{@port}/ws/websocket?vsn=#{@vsn}"
@@ -215,9 +240,11 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
                                 ref: "1", topic: ^lobby}
 
         assert_receive %Message{event: "joined",
+                                join_ref: @join_ref,
                                 payload: %{"status" => "connected", "user_id" => nil}}
         assert_receive %Message{event: "user_entered",
                                 payload: %{"user" => nil},
+                                join_ref: nil,
                                 ref: nil, topic: ^lobby}
 
         channel_pid = Process.whereis(String.to_atom(lobby))
@@ -259,6 +286,27 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
                                     %{"x-application" => "Phoenix"}}}}
       end
 
+      test "transport trace_context_headers are extracted to the socket connect_info" do
+        extra_headers = [
+          {"traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"},
+          {"tracestate", "congo=t61rcWkgMzE"}]
+        {:ok, sock} =
+          WebsocketClient.start_link(
+            self(),
+            "ws://127.0.0.1:#{@port}/ws/connect_info/websocket?vsn=#{@vsn}",
+            @serializer,
+            extra_headers
+          )
+
+        WebsocketClient.join(sock, lobby(), %{})
+
+        assert_receive %Message{event: "joined",
+                                payload: %{"connect_info" =>
+                                  %{"trace_context_headers" =>
+                                     %{"traceparent" => "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                                       "tracestate" => "congo=t61rcWkgMzE"}}}}
+      end
+
       test "transport peer_data is extracted to the socket connect_info" do
         {:ok, sock} =
           WebsocketClient.start_link(
@@ -294,6 +342,28 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
                                       "query" => "vsn=#{@vsn}",
                                       "scheme" => "http",
                                       "port" => 80}}}}
+      end
+
+      test "transport user agent is extracted to the socket connect_info" do
+        extra_headers = [{"user-agent", "foo/1.0"}]
+
+        {:ok, sock} =
+          WebsocketClient.start_link(
+            self(),
+            "ws://127.0.0.1:#{@port}/ws/connect_info/websocket?vsn=#{@vsn}",
+            @serializer,
+            extra_headers
+          )
+        WebsocketClient.join(sock, lobby(), %{})
+
+        assert_receive %Message{
+          event: "joined",
+          payload: %{
+            "connect_info" => %{
+              "user_agent" => "foo/1.0"
+            }
+          }
+        }
       end
 
       test "transport session is extracted to the socket connect_info" do
@@ -347,7 +417,6 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
 
         assert log =~ "CONNECTED TO Phoenix.Integration.WebSocketChannelsTest.UserSocket in "
         assert log =~ "  Transport: :websocket"
-        assert log =~ "  Connect Info: %{}"
         assert log =~ "  Serializer: #{inspect @serializer}"
         assert log =~ "  Parameters: %{\"logging\" => \"enabled\", \"vsn\" => #{inspect(@vsn)}}"
       end
@@ -443,6 +512,11 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
               {:error, {403, "Forbidden"}}
       end
 
+      test "refuses connects that error with custom error response" do
+        assert WebsocketClient.start_link(self(), "#{@vsn_path}&ratelimit=true", @serializer) ==
+              {:error, {429, "Too Many Requests"}}
+      end
+
       test "shuts down when receiving disconnect broadcasts on socket's id" do
         {:ok, sock} = WebsocketClient.start_link(self(), "#{@vsn_path}&user_id=1001", @serializer)
 
@@ -536,7 +610,7 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
       WebsocketClient.join(sock, "custom:ignore", %{"action" => "ignore"})
 
       assert_receive %Message{event: "phx_reply",
-                              join_ref: 11,
+                              join_ref: "11",
                               payload: %{"response" => %{"action" => "ignore"}, "status" => "error"},
                               ref: "1",
                               topic: "custom:ignore"}
@@ -544,7 +618,7 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
       WebsocketClient.join(sock, "custom:error", %{"action" => "error"})
 
       assert_receive %Message{event: "phx_reply",
-                              join_ref: 12,
+                              join_ref: "12",
                               payload: %{"response" => %{"reason" => "join crashed"}, "status" => "error"},
                               ref: "2",
                               topic: "custom:error"}
@@ -552,13 +626,50 @@ defmodule Phoenix.Integration.WebSocketChannelsTest do
       WebsocketClient.join(sock, "custom:ok", %{"action" => "ok"})
 
       assert_receive %Message{event: "phx_reply",
-                              join_ref: 13,
+                              join_ref: "13",
                               payload: %{"response" => %{"action" => "ok"}, "status" => "ok"},
                               ref: "3",
                               topic: "custom:ok"}
 
       WebsocketClient.send_event(sock, "custom:ok", "close", %{body: "bye!"})
       assert_receive %Message{event: "phx_close", payload: %{}}
+    end
+  end
+
+  describe "binary" do
+    @serializer V2.JSONSerializer
+    @vsn "2.0.0"
+    @join_ref "11"
+
+    test "messages can be pushed and received" do
+      topic = "room:bin"
+
+      {:ok, socket} =
+        WebsocketClient.start_link(
+          self(),
+          "ws://127.0.0.1:#{@port}/ws/websocket?vsn=#{@vsn}",
+          @serializer
+        )
+
+      WebsocketClient.join(socket, topic, %{})
+
+      assert_receive %Message{
+        event: "phx_reply",
+        payload: %{"response" => %{}, "status" => "ok"},
+        join_ref: @join_ref,
+        ref: "1",
+        topic: ^topic
+      }
+
+      WebsocketClient.send_event(socket, topic, "binary_event", {:binary, <<1, 2>>})
+      assert_receive %Message{
+        event: "phx_reply",
+        payload: %{"response" => {:binary, <<1, 2, 3, 4>>}, "status" => "ok"},
+        join_ref: @join_ref,
+        ref: "2",
+        topic: ^topic
+      }
+      assert_receive %Message{event: "binary_event", join_ref: @join_ref, payload: {:binary, <<0, 1>>}}
     end
   end
 end

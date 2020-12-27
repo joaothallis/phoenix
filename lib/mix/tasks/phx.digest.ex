@@ -37,6 +37,7 @@ defmodule Mix.Tasks.Phx.Digest do
 
   @doc false
   def run(all_args) do
+    Mix.Task.run "compile", all_args
     {opts, args, _} = OptionParser.parse(all_args, switches: [output: :string], aliases: [o: :output])
     input_path = List.first(args) || @default_input_path
     output_path = opts[:output] || input_path
@@ -51,9 +52,9 @@ defmodule Mix.Tasks.Phx.Digest do
         # build_embedded set to true. In case it's not true,
         # build structure is mostly a no-op, so we are fine.
         Mix.Project.build_structure()
-        Mix.shell.info [:green, "Check your digested files at #{inspect output_path}"]
+        Mix.shell().info [:green, "Check your digested files at #{inspect output_path}"]
       {:error, :invalid_path} ->
-        Mix.shell.error "The input path #{inspect input_path} does not exist"
+        Mix.shell().error "The input path #{inspect input_path} does not exist"
     end
   end
 end

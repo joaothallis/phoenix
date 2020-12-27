@@ -1,16 +1,11 @@
 defmodule <%= inspect context.web_module %>.<%= inspect Module.concat(schema.web_namespace, schema.alias) %>ControllerTest do
   use <%= inspect context.web_module %>.ConnCase
 
-  alias <%= inspect context.module %>
+  import <%= inspect context.module %>Fixtures
 
-  @create_attrs <%= inspect schema.params.create %>
-  @update_attrs <%= inspect schema.params.update %>
-  @invalid_attrs <%= inspect for {key, _} <- schema.params.create, into: %{}, do: {key, nil} %>
-
-  def fixture(:<%= schema.singular %>) do
-    {:ok, <%= schema.singular %>} = <%= inspect context.alias %>.create_<%= schema.singular %>(@create_attrs)
-    <%= schema.singular %>
-  end
+  @create_attrs <%= Mix.Phoenix.to_text schema.params.create %>
+  @update_attrs <%= Mix.Phoenix.to_text schema.params.update %>
+  @invalid_attrs <%= Mix.Phoenix.to_text (for {key, _} <- schema.params.create, into: %{}, do: {key, nil}) %>
 
   describe "index" do
     test "lists all <%= schema.plural %>", %{conn: conn} do
@@ -76,6 +71,7 @@ defmodule <%= inspect context.web_module %>.<%= inspect Module.concat(schema.web
     test "deletes chosen <%= schema.singular %>", %{conn: conn, <%= schema.singular %>: <%= schema.singular %>} do
       conn = delete(conn, Routes.<%= schema.route_helper %>_path(conn, :delete, <%= schema.singular %>))
       assert redirected_to(conn) == Routes.<%= schema.route_helper %>_path(conn, :index)
+
       assert_error_sent 404, fn ->
         get(conn, Routes.<%= schema.route_helper %>_path(conn, :show, <%= schema.singular %>))
       end
@@ -83,7 +79,7 @@ defmodule <%= inspect context.web_module %>.<%= inspect Module.concat(schema.web
   end
 
   defp create_<%= schema.singular %>(_) do
-    <%= schema.singular %> = fixture(:<%= schema.singular %>)
-    {:ok, <%= schema.singular %>: <%= schema.singular %>}
+    <%= schema.singular %> = <%= schema.singular %>_fixture()
+    %{<%= schema.singular %>: <%= schema.singular %>}
   end
 end

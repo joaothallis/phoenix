@@ -1,4 +1,4 @@
-defmodule <%= web_namespace %>.ConnCase do
+defmodule <%= @web_namespace %>.ConnCase do
   @moduledoc """
   This module defines the test case to be used by
   tests that require setting up a connection.
@@ -8,9 +8,11 @@ defmodule <%= web_namespace %>.ConnCase do
   to build common data structures and query the data layer.
 
   Finally, if the test case interacts with the database,
-  it cannot be async. For this reason, every test runs
-  inside a transaction which is reset at the beginning
-  of the test unless the test case is marked as async.
+  we enable the SQL sandbox, so changes done to the database
+  are reverted at the end of every test. If you are using
+  PostgreSQL, you can even run database tests asynchronously
+  by setting `use <%= @web_namespace %>.ConnCase, async: true`, although
+  this option is not recommended for other databases.
   """
 
   use ExUnit.CaseTemplate
@@ -18,21 +20,19 @@ defmodule <%= web_namespace %>.ConnCase do
   using do
     quote do
       # Import conveniences for testing with connections
-      use Phoenix.ConnTest
-      alias <%= web_namespace %>.Router.Helpers, as: Routes
+      import Plug.Conn
+      import Phoenix.ConnTest
+      import <%= @web_namespace %>.ConnCase
+
+      alias <%= @web_namespace %>.Router.Helpers, as: Routes
 
       # The default endpoint for testing
-      @endpoint <%= endpoint_module %>
+      @endpoint <%= @endpoint_module %>
     end
-  end<%= if ecto do %>
+  end<%= if @ecto do %>
 
   setup tags do
-    <%= adapter_config[:test_setup] %>
-
-    unless tags[:async] do
-      <%= adapter_config[:test_async] %>
-    end
-
+<%= @adapter_config[:test_setup] %>
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end<% else %>
 

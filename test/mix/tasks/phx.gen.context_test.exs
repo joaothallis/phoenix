@@ -37,6 +37,7 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
       assert String.ends_with?(context.dir, "lib/phoenix/blog")
       assert String.ends_with?(context.file, "lib/phoenix/blog.ex")
       assert String.ends_with?(context.test_file, "test/phoenix/blog_test.exs")
+      assert String.ends_with?(context.test_fixtures_file, "test/support/fixtures/blog_fixtures.ex")
       assert String.ends_with?(context.schema.file, "lib/phoenix/blog/post.ex")
     end
   end
@@ -64,6 +65,7 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
       assert String.ends_with?(context.dir, "lib/phoenix/site/blog")
       assert String.ends_with?(context.file, "lib/phoenix/site/blog.ex")
       assert String.ends_with?(context.test_file, "test/phoenix/site/blog_test.exs")
+      assert String.ends_with?(context.test_fixtures_file, "test/support/fixtures/site/blog_fixtures.ex")
       assert String.ends_with?(context.schema.file, "lib/phoenix/site/blog/post.ex")
     end
   end
@@ -80,6 +82,7 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
       context = Context.new("Blog", schema, [])
       assert Context.pre_existing?(context)
       refute Context.pre_existing_tests?(context)
+      refute Context.pre_existing_test_fixtures?(context)
 
       File.mkdir_p!("test/phoenix/blog")
       File.write!(context.test_file, """
@@ -87,6 +90,13 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
       end
       """)
       assert Context.pre_existing_tests?(context)
+
+      File.mkdir_p!("test/support/fixtures")
+      File.write!(context.test_fixtures_file, """
+      defmodule Phoenix.BlogFixtures do
+      end
+      """)
+      assert Context.pre_existing_test_fixtures?(context)
     end
   end
 
@@ -124,10 +134,11 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
 
   test "generates context and handles existing contexts", config do
     in_tmp_project config.test, fn ->
-      Gen.Context.run(~w(Blog Post posts slug:unique title:string))
+      Gen.Context.run(~w(Blog Post posts slug:unique secret:redact title:string))
 
       assert_file "lib/phoenix/blog/post.ex", fn file ->
         assert file =~ "field :title, :string"
+        assert file =~ "field :secret, :string, redact: true"
       end
 
       assert_file "lib/phoenix/blog.ex", fn file ->
@@ -142,13 +153,20 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
       assert_file "test/phoenix/blog_test.exs", fn file ->
         assert file =~ "use Phoenix.DataCase"
         assert file =~ "describe \"posts\" do"
+        assert file =~ "import Phoenix.BlogFixtures"
+      end
+
+      assert_file "test/support/fixtures/blog_fixtures.ex", fn file ->
+        assert file =~ "defmodule Phoenix.BlogFixtures do"
         assert file =~ "def post_fixture(attrs \\\\ %{})"
+        assert file =~ "title: \"some title\""
       end
 
       assert [path] = Path.wildcard("priv/repo/migrations/*_create_posts.exs")
       assert_file path, fn file ->
         assert file =~ "create table(:posts)"
         assert file =~ "add :title, :string"
+        assert file =~ "add :secret, :string"
         assert file =~ "create unique_index(:posts, [:slug])"
       end
 
@@ -167,7 +185,13 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
       assert_file "test/phoenix/blog_test.exs", fn file ->
         assert file =~ "use Phoenix.DataCase"
         assert file =~ "describe \"comments\" do"
+        assert file =~ "import Phoenix.BlogFixtures"
+      end
+
+      assert_file "test/support/fixtures/blog_fixtures.ex", fn file ->
+        assert file =~ "defmodule Phoenix.BlogFixtures do"
         assert file =~ "def comment_fixture(attrs \\\\ %{})"
+        assert file =~ "title: \"some title\""
       end
 
       assert [path] = Path.wildcard("priv/repo/migrations/*_create_comments.exs")
@@ -186,6 +210,18 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
       end
     end
   end
+
+  test "when more than 50 attributes are given", config do
+    in_tmp_project config.test, fn ->
+      long_attribute_list = 0..55 |> Enum.map(&("attribute#{&1}:string")) |> Enum.join(" ")
+      Gen.Context.run(~w(Blog Post posts title #{long_attribute_list}))
+
+      assert_file "test/phoenix/blog_test.exs", fn file ->
+        refute file =~ "...}"
+      end
+    end
+  end
+
 
   test "generates context with no schema", config do
     in_tmp_project config.test, fn ->
@@ -206,7 +242,13 @@ defmodule Mix.Tasks.Phx.Gen.ContextTest do
       assert_file "test/phoenix/blog_test.exs", fn file ->
         assert file =~ "use Phoenix.DataCase"
         assert file =~ "describe \"posts\" do"
+        assert file =~ "import Phoenix.BlogFixtures"
+      end
+
+      assert_file "test/support/fixtures/blog_fixtures.ex", fn file ->
+        assert file =~ "defmodule Phoenix.BlogFixtures do"
         assert file =~ "def post_fixture(attrs \\\\ %{})"
+        assert file =~ "title: \"some title\""
       end
 
       assert Path.wildcard("priv/repo/migrations/*_create_posts.exs") == []

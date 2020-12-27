@@ -28,7 +28,7 @@ defmodule Phoenix.Router.RoutingTest do
 
     get "/", UserController, :index, as: :users
     get "/users/top", UserController, :top, as: :top
-    get "/users/:id", UserController, :show, as: :users
+    get "/users/:id", UserController, :show, as: :users, metadata: %{access: :user}
     get "/spaced users/:id", UserController, :show
     get "/profiles/profile-:id", UserController, :show
     get "/route_that_crashes", UserController, :crash
@@ -181,6 +181,12 @@ defmodule Phoenix.Router.RoutingTest do
     assert conn.resp_body == "users any"
   end
 
+  test "raises on malformed URIs" do
+    assert_raise Phoenix.Router.MalformedURIError, fn ->
+      call(Router, :get, "/<% foo %>")
+    end
+  end
+
   describe "logging" do
     setup do
       Logger.enable(self())
@@ -217,7 +223,7 @@ defmodule Phoenix.Router.RoutingTest do
     end
   end
 
-  test "route_info returns route string and path params" do
+  test "route_info returns route string, path params, and more" do
     assert Phoenix.Router.route_info(Router, "GET", "foo/bar/baz", nil) == %{
              log: :debug,
              path_params: %{"path" => ["foo", "bar", "baz"]},
@@ -234,6 +240,7 @@ defmodule Phoenix.Router.RoutingTest do
              plug: Phoenix.Router.RoutingTest.UserController,
              plug_opts: :show,
              route: "/users/:id",
+             access: :user
            }
 
     assert Phoenix.Router.route_info(Router, "GET", "/", "host") == %{
@@ -246,5 +253,16 @@ defmodule Phoenix.Router.RoutingTest do
            }
 
     assert Phoenix.Router.route_info(Router, "POST", "/not-exists", "host") == :error
+  end
+
+  test "route_info returns route string, path params and more for split path" do
+    assert Phoenix.Router.route_info(Router, "GET", ~w(foo bar baz), nil) == %{
+             log: :debug,
+             path_params: %{"path" => ["foo", "bar", "baz"]},
+             pipe_through: [],
+             plug: Phoenix.Router.RoutingTest.UserController,
+             plug_opts: :not_found,
+             route: "/*path"
+           }
   end
 end

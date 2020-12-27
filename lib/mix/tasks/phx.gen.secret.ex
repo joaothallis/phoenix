@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Phx.Gen.Secret do
 
   @doc false
   def run([]),    do: run(["64"])
-  def run([int]), do: int |> parse!() |> random_string() |> Mix.shell.info()
+  def run([int]), do: int |> parse!() |> random_string() |> Mix.shell().info()
   def run([_|_]), do: invalid_args!()
 
   defp parse!(int) do
@@ -25,7 +25,7 @@ defmodule Mix.Tasks.Phx.Gen.Secret do
   end
 
   defp random_string(length) when length > 31 do
-    :crypto.strong_rand_bytes(length) |> Base.encode64 |> binary_part(0, length)
+    :crypto.strong_rand_bytes(length) |> Base.encode64(padding: false) |> binary_part(0, length)
   end
   defp random_string(_), do: Mix.raise "The secret should be at least 32 characters long"
 

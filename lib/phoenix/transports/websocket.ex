@@ -6,6 +6,7 @@ defmodule Phoenix.Transports.WebSocket do
     [
       path: "/websocket",
       serializer: [{V1.JSONSerializer, "~> 1.0.0"}, {V2.JSONSerializer, "~> 2.0.0"}],
+      error_handler: {__MODULE__, :handle_error, []},
       timeout: 60_000,
       transport_log: false,
       compress: false
@@ -19,6 +20,7 @@ defmodule Phoenix.Transports.WebSocket do
     |> Transport.transport_log(opts[:transport_log])
     |> Transport.force_ssl(handler, endpoint, opts)
     |> Transport.check_origin(handler, endpoint, opts)
+    |> Transport.check_subprotocols(opts[:subprotocols])
     |> case do
       %{halted: true} = conn ->
         {:error, conn}
@@ -31,6 +33,9 @@ defmodule Phoenix.Transports.WebSocket do
         case handler.connect(config) do
           {:ok, state} -> {:ok, conn, state}
           :error -> {:error, Plug.Conn.send_resp(conn, 403, "")}
+          {:error, reason} ->
+            {m, f, args} = opts[:error_handler]
+            {:error, apply(m, f, [conn, reason | args])}
         end
     end
   end
@@ -38,4 +43,6 @@ defmodule Phoenix.Transports.WebSocket do
   def connect(conn, _, _, _) do
     {:error, Plug.Conn.send_resp(conn, 400, "")}
   end
+
+  def handle_error(conn, _reason), do: Plug.Conn.send_resp(conn, 403, "")
 end

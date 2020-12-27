@@ -14,10 +14,10 @@ defmodule Phoenix.Channel do
   match on all topics starting with a given prefix by using a splat (the `*`
   character) as the last character in the topic pattern:
 
-      channel "room:*", MyApp.RoomChannel
+      channel "room:*", MyAppWeb.RoomChannel
 
   Any topic coming into the router with the `"room:"` prefix would dispatch
-  to `MyApp.RoomChannel` in the above example. Topics can also be pattern
+  to `MyAppWeb.RoomChannel` in the above example. Topics can also be pattern
   matched in your channels' `join/3` callback to pluck out the scoped pattern:
 
       # handles the special `"lobby"` subtopic
@@ -57,11 +57,21 @@ defmodule Phoenix.Channel do
         {:noreply, socket}
       end
 
-  You can also push a message directly down the socket:
+  General message payloads are received as maps, and binary data payloads are
+  passed as a `{:binary, data}` tuple:
+
+      def handle_in("file_chunk", {:binary, chunk}, socket) do
+        ...
+        {:reply, :ok, socket}
+      end
+
+  You can also push a message directly down the socket, in the form of a map,
+  or a tagged `{:binary, data}` tuple:
 
       # client asks for their current rank, push sent directly as a new event.
       def handle_in("current_rank", _, socket) do
         push(socket, "current_rank", %{val: Game.get_rank(socket.assigns[:user])})
+        push(socket, "photo", {:binary, File.read!(socket.assigns.photo_path)})
         {:noreply, socket}
       end
 
@@ -79,10 +89,10 @@ defmodule Phoenix.Channel do
 
         if changeset.valid? do
           post = Repo.insert!(changeset)
-          response = MyApp.PostView.render("show.json", %{post: post})
+          response = MyAppWeb.PostView.render("show.json", %{post: post})
           {:reply, {:ok, response}, socket}
         else
-          response = MyApp.ChangesetView.render("errors.json", %{changeset: changeset})
+          response = MyAppWeb.ChangesetView.render("errors.json", %{changeset: changeset})
           {:reply, {:error, response}, socket}
         end
       end
@@ -99,6 +109,10 @@ defmodule Phoenix.Channel do
           {:reply, :error, socket}
         end
       end
+
+  Like binary pushes, binary data is also supported with replies via a `{:binary, data}` tuple:
+
+      {:reply, {:ok, {:binary, bin}}, socket}
 
   ## Intercepting Outgoing Events
 
@@ -140,7 +154,7 @@ defmodule Phoenix.Channel do
       def handle_in("new_msg", %{"uid" => uid, "body" => body}, socket) do
         ...
         broadcast_from!(socket, "new_msg", %{uid: uid, body: body})
-        MyApp.Endpoint.broadcast_from!(self(), "room:superadmin",
+        MyAppWeb.Endpoint.broadcast_from!(self(), "room:superadmin",
           "new_msg", %{uid: uid, body: body})
         {:noreply, socket}
       end
@@ -148,8 +162,8 @@ defmodule Phoenix.Channel do
       # within controller
       def create(conn, params) do
         ...
-        MyApp.Endpoint.broadcast!("room:" <> rid, "new_msg", %{uid: uid, body: body})
-        MyApp.Endpoint.broadcast!("room:superadmin", "new_msg", %{uid: uid, body: body})
+        MyAppWeb.Endpoint.broadcast!("room:" <> rid, "new_msg", %{uid: uid, body: body})
+        MyAppWeb.Endpoint.broadcast!("room:superadmin", "new_msg", %{uid: uid, body: body})
         redirect(conn, to: "/")
       end
 
@@ -167,11 +181,15 @@ defmodule Phoenix.Channel do
 
   `terminate/2`, however, won't be invoked in case of errors nor in
   case of exits. This is the same behaviour as you find in Elixir
-  abstractions like `GenServer` and others. Typically speaking, if you
-  want to clean something up, it is better to monitor your channel
-  process and do the clean up from another process.  Similar to GenServer,
+  abstractions like `GenServer` and others. Similar to `GenServer`,
   it would also be possible `:trap_exit` to guarantee that `terminate/2`
   is invoked. This practice is not encouraged though.
+
+  Typically speaking, if you want to clean something up, it is better to
+  monitor your channel process and do the clean up from another process.
+  All channel callbacks including `join/3` are called from within the
+  channel process. Therefore, `self()` in any of them returns the PID to
+  be monitored.
 
   ## Exit reasons when stopping a channel
 
@@ -198,14 +216,14 @@ defmodule Phoenix.Channel do
   ## Subscribing to external topics
 
   Sometimes you may need to programmatically subscribe a socket to external
-  topics in addition to the the internal `socket.topic`. For example,
+  topics in addition to the internal `socket.topic`. For example,
   imagine you have a bidding system where a remote client dynamically sets
   preferences on products they want to receive bidding notifications on.
   Instead of requiring a unique channel process and topic per
   preference, a more efficient and simple approach would be to subscribe a
   single channel to relevant notifications via your endpoint. For example:
 
-      defmodule MyApp.Endpoint.NotificationChannel do
+      defmodule MyAppWeb.Endpoint.NotificationChannel do
         use Phoenix.Channel
 
         def join("notification:" <> user_id, %{"ids" => ids}, socket) do
@@ -221,7 +239,7 @@ defmodule Phoenix.Channel do
         end
 
         def handle_in("unwatch", %{"product_id" => id}, socket) do
-          {:reply, :ok, MyApp.Endpoint.unsubscribe("product:#{id}")}
+          {:reply, :ok, MyAppWeb.Endpoint.unsubscribe("product:#{id}")}
         end
 
         defp put_new_topics(socket, topics) do
@@ -230,7 +248,7 @@ defmodule Phoenix.Channel do
             if topic in topics do
               acc
             else
-              :ok = MyApp.Endpoint.subscribe(topic)
+              :ok = MyAppWeb.Endpoint.subscribe(topic)
               assign(acc, :topics, [topic | topics])
             end
           end)
@@ -339,7 +357,7 @@ defmodule Phoenix.Channel do
   @doc """
   Handle regular Elixir process messages.
 
-  See `GenServer.handle_info/2`.
+  See `c:GenServer.handle_info/2`.
   """
   @callback handle_info(msg :: term, socket :: Socket.t()) ::
               {:noreply, Socket.t()}
@@ -348,7 +366,7 @@ defmodule Phoenix.Channel do
   @doc """
   Handle regular GenServer call messages.
 
-  See `GenServer.handle_call/3`.
+  See `c:GenServer.handle_call/3`.
   """
   @callback handle_call(msg :: term, from :: {pid, tag :: term}, socket :: Socket.t()) ::
               {:reply, response :: term, Socket.t()}
@@ -358,7 +376,7 @@ defmodule Phoenix.Channel do
   @doc """
   Handle regular GenServer cast messages.
 
-  See `GenServer.handle_cast/2`.
+  See `c:GenServer.handle_cast/2`.
   """
   @callback handle_cast(msg :: term, socket :: Socket.t()) ::
               {:noreply, Socket.t()}
@@ -373,7 +391,7 @@ defmodule Phoenix.Channel do
   @doc """
   Invoked when the channel process is about to exit.
 
-  See `GenServer.terminate/2`.
+  See `c:GenServer.terminate/2`.
   """
   @callback terminate(
               reason :: :normal | :shutdown | {:shutdown, :left | :closed | term},
@@ -402,7 +420,7 @@ defmodule Phoenix.Channel do
       @phoenix_shutdown Keyword.get(opts, :shutdown, 5000)
 
       import unquote(__MODULE__)
-      import Phoenix.Socket, only: [assign: 3]
+      import Phoenix.Socket, only: [assign: 3, assign: 2]
 
       def child_spec(init_arg) do
         %{
@@ -549,7 +567,7 @@ defmodule Phoenix.Channel do
   """
   def push(socket, event, message) do
     %{transport_pid: transport_pid, topic: topic} = assert_joined!(socket)
-    Server.push(transport_pid, topic, event, message, socket.serializer)
+    Server.push(transport_pid, socket.join_ref, topic, event, message, socket.serializer)
   end
 
   @doc """

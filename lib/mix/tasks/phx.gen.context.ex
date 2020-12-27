@@ -77,8 +77,8 @@ defmodule Mix.Tasks.Phx.Gen.Context do
 
   @doc false
   def run(args) do
-    if Mix.Project.umbrella? do
-      Mix.raise "mix phx.gen.context can only be run inside an application directory"
+    if Mix.Project.umbrella?() do
+      Mix.raise "mix phx.gen.context must be invoked from within your *_web application root directory"
     end
 
     {context, schema} = build(args)
@@ -100,11 +100,11 @@ defmodule Mix.Tasks.Phx.Gen.Context do
   end
 
   @doc false
-  def build(args) do
+  def build(args, help \\ __MODULE__) do
     {opts, parsed, _} = parse_opts(args)
-    [context_name, schema_name, plural | schema_args] = validate_args!(parsed)
+    [context_name, schema_name, plural | schema_args] = validate_args!(parsed, help)
     schema_module = inspect(Module.concat(context_name, schema_name))
-    schema = Gen.Schema.build([schema_module, plural | schema_args], opts, __MODULE__)
+    schema = Gen.Schema.build([schema_module, plural | schema_args], opts, help)
     context = Context.new(context_name, schema, opts)
     {context, schema}
   end
@@ -137,6 +137,7 @@ defmodule Mix.Tasks.Phx.Gen.Context do
     if schema.generate?, do: Gen.Schema.copy_new_files(schema, paths, binding)
     inject_schema_access(context, paths, binding)
     inject_tests(context, paths, binding)
+    inject_test_fixture(context, paths, binding)
 
     context
   end
@@ -165,13 +166,23 @@ defmodule Mix.Tasks.Phx.Gen.Context do
     |> inject_eex_before_final_end(test_file, binding)
   end
 
+  defp inject_test_fixture(%Context{test_fixtures_file: test_fixtures_file} = context, paths, binding) do
+    unless Context.pre_existing_test_fixtures?(context) do
+      Mix.Generator.create_file(test_fixtures_file, Mix.Phoenix.eval_from(paths, "priv/templates/phx.gen.context/fixtures_module.ex", binding))
+    end
+
+    paths
+    |> Mix.Phoenix.eval_from("priv/templates/phx.gen.context/fixtures.ex", binding)
+    |> inject_eex_before_final_end(test_fixtures_file, binding)
+  end
+
   defp inject_eex_before_final_end(content_to_inject, file_path, binding) do
     file = File.read!(file_path)
 
     if String.contains?(file, content_to_inject) do
       :ok
     else
-      Mix.shell.info([:green, "* injecting ", :reset, Path.relative_to_cwd(file_path)])
+      Mix.shell().info([:green, "* injecting ", :reset, Path.relative_to_cwd(file_path)])
 
       file
       |> String.trim_trailing()
@@ -200,25 +211,25 @@ defmodule Mix.Tasks.Phx.Gen.Context do
     end
   end
 
-  defp validate_args!([context, schema, _plural | _] = args) do
+  defp validate_args!([context, schema, _plural | _] = args, help) do
     cond do
       not Context.valid?(context) ->
-        raise_with_help "Expected the context, #{inspect context}, to be a valid module name"
+        help.raise_with_help "Expected the context, #{inspect context}, to be a valid module name"
       not Schema.valid?(schema) ->
-        raise_with_help "Expected the schema, #{inspect schema}, to be a valid module name"
+        help.raise_with_help "Expected the schema, #{inspect schema}, to be a valid module name"
       context == schema ->
-        raise_with_help "The context and schema should have different names"
+        help.raise_with_help "The context and schema should have different names"
       context == Mix.Phoenix.base() ->
-        raise_with_help "Cannot generate context #{context} because it has the same name as the application"
+        help.raise_with_help "Cannot generate context #{context} because it has the same name as the application"
       schema == Mix.Phoenix.base() ->
-        raise_with_help "Cannot generate schema #{schema} because it has the same name as the application"
+        help.raise_with_help "Cannot generate schema #{schema} because it has the same name as the application"
       true ->
         args
     end
   end
 
-  defp validate_args!(_) do
-    raise_with_help "Invalid arguments"
+  defp validate_args!(_, help) do
+    help.raise_with_help "Invalid arguments"
   end
 
   @doc false
@@ -227,13 +238,14 @@ defmodule Mix.Tasks.Phx.Gen.Context do
     Mix.raise """
     #{msg}
 
-    mix phx.gen.html, phx.gen.json and phx.gen.context expect a
-    context module name, followed by singular and plural names of
-    the generated resource, ending with any number of attributes.
+    mix phx.gen.html, phx.gen.json, phx.gen.live, and phx.gen.context
+    expect a context module name, followed by singular and plural names
+    of the generated resource, ending with any number of attributes.
     For example:
 
         mix phx.gen.html Accounts User users name:string
         mix phx.gen.json Accounts User users name:string
+        mix phx.gen.live Accounts User users name:string
         mix phx.gen.context Accounts User users name:string
 
     The context serves as the API boundary for the given resource.
@@ -242,12 +254,13 @@ defmodule Mix.Tasks.Phx.Gen.Context do
     """
   end
 
+  def prompt_for_code_injection(%Context{generate?: false}), do: :ok
   def prompt_for_code_injection(%Context{} = context) do
     if Context.pre_existing?(context) do
       function_count = Context.function_count(context)
       file_count = Context.file_count(context)
 
-      Mix.shell.info """
+      Mix.shell().info """
       You are generating into an existing context.
 
       The #{inspect context.module} context currently has #{function_count} functions and \
@@ -264,7 +277,7 @@ defmodule Mix.Tasks.Phx.Gen.Context do
 
       If you are not sure, prefer creating a new context over adding to the existing one.
       """
-      unless Mix.shell.yes?("Would you like to proceed?") do
+      unless Mix.shell().yes?("Would you like to proceed?") do
         System.halt()
       end
     end

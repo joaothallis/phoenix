@@ -37,10 +37,15 @@ Then load dependencies to compile code and assets:
 $ mix deps.get --only prod
 $ MIX_ENV=prod mix compile
 
+# Install / update  JavaScript dependencies
+$ npm install --prefix ./assets
+
 # Compile assets
 $ npm run deploy --prefix ./assets
-$ mix phx.digest
+$ MIX_ENV=prod mix phx.digest
 ```
+
+*Note:* the `--prefix` flag on `npm` may not work on Windows. If so, replace the first command by `cd assets && npm run deploy && cd ..`.
 
 And now run `mix release`:
 
@@ -60,10 +65,10 @@ Release created at _build/prod/rel/my_app!
 
 You can start the release by calling `_build/prod/rel/my_app/bin/my_app start`, where you have to replace `my_app` by your current application name. If you do so, your application should start but you will notice your web server does not actually run! That's because we need to tell Phoenix to start the web servers. When using `mix phx.server`, the `phx.server` command does that for us, but in a release we don't have Mix (which is a *build* tool), so we have to do it ourselves.
 
-Open up `config/prod.secret.exs` and you should find a section about "Using releases" with a configuration to set. Go ahead and uncomment that line or manually add the line below, adapted to your application names:
+Open up `config/runtime.exs` (formerly `config/prod.secret.exs`) and you should find a section about "Using releases" with a configuration to set. Go ahead and uncomment that line or manually add the line below, adapted to your application names:
 
 ```elixir
-config :my_app, MyApp.Endpoint, server: true
+config :my_app, MyAppWeb.Endpoint, server: true
 ```
 
 Now assemble the release once again:
@@ -80,7 +85,7 @@ Release created at _build/prod/rel/my_app!
     _build/prod/rel/my_app/bin/my_app start
 ```
 
-And starting the release now should also successfully start the web server! Now you can get all of the files under the `_build/prod/rel/my_app` directory, package it, and run it in any production machine with the same OS and archictecture as the one that assembled the release. For more details, check the [docs for `mix release`](https://hexdocs.pm/mix/Mix.Tasks.Release.html).
+And starting the release now should also successfully start the web server! Now you can get all of the files under the `_build/prod/rel/my_app` directory, package it, and run it in any production machine with the same OS and architecture as the one that assembled the release. For more details, check the [docs for `mix release`](https://hexdocs.pm/mix/Mix.Tasks.Release.html).
 
 But before we finish this guide, there are two features from releases most Phoenix applications will use, so let's talk about those.
 
@@ -90,11 +95,9 @@ You may have noticed that, in order to assemble our release, we had to set both 
 
 However, in many cases, we don't want to set the values for `SECRET_KEY_BASE` and `DATABASE_URL` when assembling the release but only when starting the system in production. In particular, you may not even have those values easily accessible, and you may have to reach out to another system to retrieve those. Luckily, for such use cases, `mix release` provides runtime configuration, which we can enable in three steps:
 
-1. Rename `config/prod.secret.exs` to `config/releases.exs`
+1. Rename `config/runtime.exs` (formerly `config/prod.secret.exs`) to `config/releases.exs`
 
-2. Change `use Mix.Config` inside the new `config/releases.exs` file to `import Config` (if you want, you can replace all uses of `use Mix.Config` by `import Config`, as the latter replaces the former)
-
-3. Change `config/prod.exs` to no longer call `import_config "prod.secret.exs"` at the bottom
+2. Change `config/prod.exs` to no longer call `import_config "runtime.exs"` (formerly `prod.secret.exs`) at the bottom
 
 Now if you assemble another release, you should see this:
 
@@ -169,13 +172,12 @@ Elixir releases work well with container technologies, such as Docker. The idea 
 Here is an example Docker file to run at the root of your application covering all of the steps above:
 
 ```docker
-FROM elixir:1.9.0-alpine AS build
+FROM hexpm/elixir:1.11.2-erlang-23.1.2-alpine-3.12.1 as build
 
 # install build dependencies
-RUN apk add --update build-base npm git
+RUN apk add --no-cache build-base npm git python3
 
 # prepare build dir
-RUN mkdir /app
 WORKDIR /app
 
 # install hex + rebar
@@ -187,36 +189,62 @@ ENV MIX_ENV=prod
 
 # install mix dependencies
 COPY mix.exs mix.lock ./
-COPY config config
-RUN mix deps.get
+RUN mix deps.get --only $MIX_ENV
+RUN mkdir config
+# Dependencies sometimes use compile-time configuration. Copying
+# these compile-time config files before we compile dependencies
+# ensures that any relevant config changes will trigger the dependencies
+# to be re-compiled.
+COPY config/config.exs config/$MIX_ENV.exs config/
 RUN mix deps.compile
 
 # build assets
+COPY assets/package.json assets/package-lock.json ./assets/
+# install all npm dependencies from scratch
+RUN npm --prefix ./assets ci --progress=false --no-audit --loglevel=error
+
+COPY priv priv
+
+# Note: if your project uses a tool like https://purgecss.com/,
+# which customizes asset compilation based on what it finds in
+# your Elixir templates, you will need to move the asset compilation step
+# down so that `lib` is available.
 COPY assets assets
-RUN cd assets && npm install && npm run deploy
+# use webpack to compile npm dependencies - https://www.npmjs.com/package/webpack-deploy
+RUN npm run --prefix ./assets deploy
 RUN mix phx.digest
 
-# build project
-COPY priv priv
+# compile and build the release
 COPY lib lib
 RUN mix compile
-
-# build release
-COPY rel rel
+# changes to config/runtime.exs don't require recompiling the code
+COPY config/runtime.exs config/
+# uncomment COPY if rel/ exists
+# COPY rel rel
 RUN mix release
 
-# prepare release image
-FROM alpine:3.9 AS app
-RUN apk add --update bash openssl
+# Start a new build stage so that the final image will only contain
+# the compiled release and other runtime necessities
+FROM alpine:3.12.1 AS app
+RUN apk add --no-cache openssl ncurses-libs
 
-RUN mkdir /app
 WORKDIR /app
 
-COPY --from=build /app/_build/prod/rel/my_app ./
-RUN chown -R nobody: /app
-USER nobody
+RUN chown nobody:nobody /app
+
+USER nobody:nobody
+
+COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/my_app ./
 
 ENV HOME=/app
+
+ENTRYPOINT ["bin/my_app"]
+CMD ["start"]
 ```
 
 At the end, you will have an application in `/app` ready to run as `bin/my_app start`.
+
+A few points about configuring a containerized application:
+
+- If you run your app in a container, the `Endpoint` needs to be configured to listen on a "public" `:ip` address (like `0.0.0.0.0.0.0.0`) so that the app can be reached from outside the container. Whether the host should publish the container's ports to its own public IP or to localhost depends on your needs.
+- The more configuration you can provide at runtime (using `config/runtime.exs`), the more reusable your images will be across environments. In particular, secrets like database credentials and API keys should not be compiled into the image, but rather should be provided when creating containers based on that image. This is why the `Endpoint`'s `:secret_key_base` is configured in `config/runtime.exs` by default.

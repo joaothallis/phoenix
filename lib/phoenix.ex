@@ -2,15 +2,18 @@ defmodule Phoenix do
   @moduledoc """
   This is the documentation for the Phoenix project.
 
-  By default, Phoenix applications depend on the following packages:
+  By default, Phoenix applications depend on the following packages
+  across these categories.
+
+  ## General
 
     * [Ecto](https://hexdocs.pm/ecto) - a language integrated query and
       database wrapper
 
+    * [ExUnit](https://hexdocs.pm/ex_unit) - Elixir's built-in test framework
+
     * [Phoenix](https://hexdocs.pm/phoenix) - the Phoenix web framework
       (these docs)
-
-    * [Phoenix.js](js) - Phoenix Channels JavaScript client
 
     * [Phoenix PubSub](https://hexdocs.pm/phoenix_pubsub) - a distributed
       pub/sub system with presence support
@@ -18,17 +21,17 @@ defmodule Phoenix do
     * [Phoenix HTML](https://hexdocs.pm/phoenix_html) - conveniences for
       working with HTML in Phoenix
 
+    * [Phoenix View](https://hexdocs.pm/phoenix_view) - a set of functions
+      for building `Phoenix.View` and working with template languages such
+      as Elixir's own `EEx`
+
     * [Plug](https://hexdocs.pm/plug) - a specification and conveniences
       for composable modules in between web applications
 
     * [Gettext](https://hexdocs.pm/gettext) - Internationalization and
       localization through [`gettext`](https://www.gnu.org/software/gettext/)
 
-  There are also optional packages depending on your configuration:
-
-    * [Phoenix PubSub Redis](https://hexdocs.pm/phoenix_pubsub_redis) - use
-      Redis to power the Phoenix PubSub system
-
+  To get started, see our [overview guides](overview.html).
   """
   use Application
 
@@ -44,7 +47,9 @@ defmodule Phoenix do
       :erlang.system_flag(:backtrace_depth, stacktrace_depth)
     end
 
-    Phoenix.Logger.install()
+    if Application.fetch_env!(:phoenix, :logger) do
+      Phoenix.Logger.install()
+    end
 
     children = [
       # Code reloading must be serial across all Phoenix apps

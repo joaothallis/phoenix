@@ -5,7 +5,10 @@ modules = [
   CommentController,
   FileController,
   ProductController,
-  Admin.MessageController
+  TrailController,
+  VistaController,
+  Admin.MessageController,
+  SubPlug
 ]
 
 for module <- modules do
@@ -18,8 +21,6 @@ end
 defmodule Phoenix.Router.HelpersTest do
   use ExUnit.Case, async: true
   use RouterHelper
-
-  alias Phoenix.Router.Helpers
 
   defmodule Router do
     use Phoenix.Router
@@ -50,13 +51,32 @@ defmodule Phoenix.Router.HelpersTest do
 
     scope "/admin/new", alias: Admin, as: "admin" do
       resources "/messages", MessageController
+
+      scope "/unscoped", as: false do
+        resources "/messages", MessageController, as: :my_admin_message
+      end
     end
+
+    scope "/trails", trailing_slash: true do
+      get "/", TrailController, :index
+      get "/open", TrailController, :open, trailing_slash: false
+
+      resources "/vistas", VistaController
+
+      scope "/nested" do
+        get "/path", TrailController, :nested_path
+      end
+    end
+
+    get "/trails/top", TrailController, :top, trailing_slash: true
 
     get "/", PostController, :root, as: :page
     get "/products/:id", ProductController, :show
     get "/products", ProductController, :show
     get "/products/:id/:sort", ProductController, :show
     get "/products/:id/:sort/:page", ProductController, :show
+
+    get "/mfa_path", SubPlug, func: {M, :f, [10]}
   end
 
   # Emulate regular endpoint functions
@@ -82,7 +102,7 @@ defmodule Phoenix.Router.HelpersTest do
   alias Router.Helpers
 
   test "defines a __helpers__ function" do
-    assert Router.__helpers__ == Router.Helpers
+    assert Router.__helpers__() == Router.Helpers
   end
 
   test "root helper" do
@@ -154,20 +174,12 @@ defmodule Phoenix.Router.HelpersTest do
 
     error_message = fn helper, arity ->
       """
-      no function clause for #{inspect Helpers}.#{helper}/#{arity} and action :skip. The following actions/clauses are supported:
+      no action :skip for #{inspect Helpers}.#{helper}/#{arity}. The following actions/clauses are supported:
 
           #{helper}(conn_or_endpoint, :file, file, params \\\\ [])
           #{helper}(conn_or_endpoint, :show, id, params \\\\ [])
 
       """ |> String.trim
-    end
-
-    assert_raise UndefinedFunctionError, fn ->
-      Helpers.post_path(__MODULE__, :skip)
-    end
-
-    assert_raise UndefinedFunctionError, fn ->
-      Helpers.post_url(__MODULE__, :skip)
     end
 
     assert_raise ArgumentError, error_message.("post_path", 3), fn ->
@@ -209,6 +221,13 @@ defmodule Phoenix.Router.HelpersTest do
       "/posts/file/%3D%3Dd--%2B/%3AO.jpg"
     assert Helpers.post_path(__MODULE__, :file, ["==d--+", ":O.jpg"], xx: "/=+/") ==
       "/posts/file/%3D%3Dd--%2B/%3AO.jpg?xx=%2F%3D%2B%2F"
+  end
+
+  test "top-level named routes with trailing slashes" do
+    assert Helpers.trail_path(__MODULE__, :top) == "/trails/top/"
+    assert Helpers.trail_path(__MODULE__, :top, id: 5) == "/trails/top/?id=5"
+    assert Helpers.trail_path(__MODULE__, :top, %{"id" => "foo"}) == "/trails/top/?id=foo"
+    assert Helpers.trail_path(__MODULE__, :top, %{"id" => "foo bar"}) == "/trails/top/?id=foo+bar"
   end
 
   test "resources generates named routes for :index, :edit, :show, :new" do
@@ -258,43 +277,15 @@ defmodule Phoenix.Router.HelpersTest do
     assert Helpers.user_comment_path(__MODULE__, :new, 88, []) == "/users/88/comments/new"
     assert Helpers.user_comment_path(__MODULE__, :new, 88) == "/users/88/comments/new"
 
-    error_message = fn helper, arity ->
-      """
-      no function clause for #{inspect Helpers}.#{helper}/#{arity} and action :skip. The following actions/clauses are supported:
-
-          user_comment_file_path(conn_or_endpoint, :create, user_id, comment_id, params \\\\ [])
-          user_comment_file_path(conn_or_endpoint, :delete, user_id, comment_id, id, params \\\\ [])
-          user_comment_file_path(conn_or_endpoint, :edit, user_id, comment_id, id, params \\\\ [])
-          user_comment_file_path(conn_or_endpoint, :index, user_id, comment_id, params \\\\ [])
-          user_comment_file_path(conn_or_endpoint, :new, user_id, comment_id, params \\\\ [])
-          user_comment_file_path(conn_or_endpoint, :show, user_id, comment_id, id, params \\\\ [])
-          user_comment_file_path(conn_or_endpoint, :update, user_id, comment_id, id, params \\\\ [])
-      """ |> String.trim
-    end
-
-    assert_raise ArgumentError, error_message.("user_comment_file_path", 4), fn ->
+    assert_raise ArgumentError, ~r/no action :skip/, fn ->
       Helpers.user_comment_file_path(__MODULE__, :skip, 123, 456)
     end
 
-    assert_raise ArgumentError, error_message.("user_comment_file_path", 5), fn ->
+    assert_raise ArgumentError, ~r/no action :skip/, fn ->
       Helpers.user_comment_file_path(__MODULE__, :skip, 123, 456, foo: "bar")
     end
 
-    arity_error_message =
-      """
-      no action :show for helper #{inspect Helpers}.user_comment_path/3. The following actions/clauses are supported:
-
-          user_comment_path(conn_or_endpoint, :create, user_id, params \\\\ [])
-          user_comment_path(conn_or_endpoint, :delete, user_id, id, params \\\\ [])
-          user_comment_path(conn_or_endpoint, :edit, user_id, id, params \\\\ [])
-          user_comment_path(conn_or_endpoint, :index, user_id, params \\\\ [])
-          user_comment_path(conn_or_endpoint, :new, user_id, params \\\\ [])
-          user_comment_path(conn_or_endpoint, :show, user_id, id, params \\\\ [])
-          user_comment_path(conn_or_endpoint, :update, user_id, id, params \\\\ [])
-
-      """ |> String.trim
-
-    assert_raise ArgumentError, arity_error_message, fn ->
+    assert_raise ArgumentError, ~r/no function clause for Phoenix.Router.HelpersTest.Router.Helpers.user_comment_path\/3 and action :show/, fn ->
       Helpers.user_comment_path(__MODULE__, :show, 123)
     end
   end
@@ -386,6 +377,59 @@ defmodule Phoenix.Router.HelpersTest do
     assert Helpers.admin_message_path(__MODULE__, :index) == "/admin/new/messages"
     assert Helpers.admin_message_path(__MODULE__, :show, 1, []) == "/admin/new/messages/1"
     assert Helpers.admin_message_path(__MODULE__, :show, 1) == "/admin/new/messages/1"
+  end
+
+  test "scoped route helpers generated unscoped :as options" do
+    assert Helpers.my_admin_message_path(__MODULE__, :index, []) == "/admin/new/unscoped/messages"
+    assert Helpers.my_admin_message_path(__MODULE__, :index) == "/admin/new/unscoped/messages"
+    assert Helpers.my_admin_message_path(__MODULE__, :show, 1, []) == "/admin/new/unscoped/messages/1"
+    assert Helpers.my_admin_message_path(__MODULE__, :show, 1) == "/admin/new/unscoped/messages/1"
+  end
+
+  test "scoped route helpers generated with trailing slashes" do
+    assert Helpers.trail_path(__MODULE__, :index) == "/trails/"
+    assert Helpers.trail_path(__MODULE__, :index, id: 5) == "/trails/?id=5"
+    assert Helpers.trail_path(__MODULE__, :index, %{"id" => "foo"}) == "/trails/?id=foo"
+    assert Helpers.trail_path(__MODULE__, :index, %{"id" => "foo bar"}) == "/trails/?id=foo+bar"
+  end
+
+  test "scoped route helpers generated with trailing slashes overridden" do
+    assert Helpers.trail_path(__MODULE__, :open) == "/trails/open"
+    assert Helpers.trail_path(__MODULE__, :open, id: 5) == "/trails/open?id=5"
+    assert Helpers.trail_path(__MODULE__, :open, %{"id" => "foo"}) == "/trails/open?id=foo"
+    assert Helpers.trail_path(__MODULE__, :open, %{"id" => "foo bar"}) == "/trails/open?id=foo+bar"
+  end
+
+  test "scoped route helpers generated with trailing slashes for resource" do
+    assert Helpers.vista_path(__MODULE__, :index) == "/trails/vistas/"
+    assert Helpers.vista_path(__MODULE__, :index, []) == "/trails/vistas/"
+    assert Helpers.vista_path(__MODULE__, :index, id: 5) == "/trails/vistas/?id=5"
+    assert Helpers.vista_path(__MODULE__, :index, %{"id" => "foo"}) == "/trails/vistas/?id=foo"
+
+    assert Helpers.vista_path(__MODULE__, :new) == "/trails/vistas/new/"
+    assert Helpers.vista_path(__MODULE__, :new, []) == "/trails/vistas/new/"
+    assert Helpers.vista_path(__MODULE__, :create) == "/trails/vistas/"
+    assert Helpers.vista_path(__MODULE__, :create, []) == "/trails/vistas/"
+    assert Helpers.vista_path(__MODULE__, :show, 2) == "/trails/vistas/2/"
+    assert Helpers.vista_path(__MODULE__, :show, 2, []) == "/trails/vistas/2/"
+    assert Helpers.vista_path(__MODULE__, :edit, 2) == "/trails/vistas/2/edit/"
+    assert Helpers.vista_path(__MODULE__, :edit, 2, []) == "/trails/vistas/2/edit/"
+    assert Helpers.vista_path(__MODULE__, :update, 2) == "/trails/vistas/2/"
+    assert Helpers.vista_path(__MODULE__, :update, 2, []) == "/trails/vistas/2/"
+    assert Helpers.vista_path(__MODULE__, :delete, 2) == "/trails/vistas/2/"
+    assert Helpers.vista_path(__MODULE__, :delete, 2, []) == "/trails/vistas/2/"
+  end
+
+  test "scoped route helpers generated within scoped routes with trailing slashes" do
+    assert Helpers.trail_path(__MODULE__, :nested_path) == "/trails/nested/path/"
+    assert Helpers.trail_path(__MODULE__, :nested_path, []) == "/trails/nested/path/"
+    assert Helpers.trail_path(__MODULE__, :nested_path, [id: 5]) == "/trails/nested/path/?id=5"
+    assert Helpers.trail_path(__MODULE__, :nested_path, %{"id" => "foo"}) == "/trails/nested/path/?id=foo"
+    assert Helpers.trail_path(__MODULE__, :nested_path, %{"id" => "foo bar"}) == "/trails/nested/path/?id=foo+bar"
+  end
+
+  test "can pass an {m, f, a} tuple as a plug argument" do
+    assert Helpers.sub_plug_path(__MODULE__, func: {M, :f, [10]}) == "/mfa_path"
   end
 
   ## Others

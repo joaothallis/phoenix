@@ -8,8 +8,9 @@ defmodule Phoenix.Endpoint.EndpointTest do
            static_url: [host: "static.example.com"],
            server: false, http: [port: 80], https: [port: 443],
            force_ssl: [subdomains: true],
-           cache_static_manifest: "../../../../test/fixtures/cache_manifest.json",
+           cache_static_manifest: "../../../../test/fixtures/digest/compile/cache_manifest.json",
            pubsub_server: :endpoint_pub]
+
   Application.put_env(:phoenix, __MODULE__.Endpoint, @config)
 
   defmodule Endpoint do
@@ -19,6 +20,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
     assert is_list(config)
     assert @otp_app == :phoenix
     assert code_reloading? == false
+    assert @compile_config == [force_ssl: [subdomains: true]]
   end
 
   defmodule NoConfigEndpoint do
@@ -50,10 +52,10 @@ defmodule Phoenix.Endpoint.EndpointTest do
     endpoint_id = Endpoint.config(:endpoint_id)
     assert Endpoint.config(:url) == [host: {:system, "ENDPOINT_TEST_HOST"}, path: "/api"]
     assert Endpoint.config(:static_url) == [host: "static.example.com"]
-    assert Endpoint.url == "https://example.com"
+    assert Endpoint.url() == "https://example.com"
     assert Endpoint.path("/") == "/api/"
-    assert Endpoint.static_url == "https://static.example.com"
-    assert Endpoint.struct_url == %URI{scheme: "https", host: "example.com", port: 443}
+    assert Endpoint.static_url() == "https://static.example.com"
+    assert Endpoint.struct_url() == %URI{scheme: "https", host: "example.com", port: 443}
 
     config =
       @config
@@ -66,10 +68,10 @@ defmodule Phoenix.Endpoint.EndpointTest do
            [host: {:system, "ENDPOINT_TEST_HOST"}, path: "/api", port: 1234]
     assert Enum.sort(Endpoint.config(:static_url)) ==
            [host: "static.example.com", port: 456]
-    assert Endpoint.url == "https://example.com:1234"
+    assert Endpoint.url() == "https://example.com:1234"
     assert Endpoint.path("/") == "/api/"
-    assert Endpoint.static_url == "https://static.example.com:456"
-    assert Endpoint.struct_url == %URI{scheme: "https", host: "example.com", port: 1234}
+    assert Endpoint.static_url() == "https://static.example.com:456"
+    assert Endpoint.struct_url() == %URI{scheme: "https", host: "example.com", port: 1234}
   end
 
   test "sets script name when using path" do
@@ -94,19 +96,21 @@ defmodule Phoenix.Endpoint.EndpointTest do
   end
 
   test "warms up caches on load and config change" do
+    assert Endpoint.config(:cache_static_manifest_latest) ==
+             %{"foo.css" => "foo-d978852bea6530fcd197b5445ed008fd.css"}
+
     assert Endpoint.static_path("/foo.css") == "/foo-d978852bea6530fcd197b5445ed008fd.css?vsn=d"
 
     # Trigger a config change and the cache should be warmed up again
-    config = put_in(@config[:cache_static_manifest], "../../../../test/fixtures/cache_manifest_upgrade.json")
+    config = put_in(@config[:cache_static_manifest], "../../../../test/fixtures/digest/compile/cache_manifest_upgrade.json")
 
     assert Endpoint.config_change([{Endpoint, config}], []) == :ok
+    assert Endpoint.config(:cache_static_manifest_latest) == %{"foo.css" => "foo-ghijkl.css"}
     assert Endpoint.static_path("/foo.css") == "/foo-ghijkl.css?vsn=d"
   end
 
   @tag :capture_log
   test "invokes init/2 callback" do
-    Application.put_env(:phoenix, __MODULE__.InitEndpoint, parent: self())
-
     defmodule InitEndpoint do
       use Phoenix.Endpoint, otp_app: :phoenix
 
@@ -116,7 +120,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
       end
     end
 
-    {:ok, pid} = InitEndpoint.start_link()
+    {:ok, pid} = InitEndpoint.start_link(parent: self())
     assert_receive {^pid, :sample}
   end
 
@@ -143,7 +147,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
   end
 
   test "injects pubsub broadcast with configured server" do
-    Phoenix.PubSub.subscribe(:endpoint_pub, "sometopic")
+    Endpoint.subscribe("sometopic")
     some = spawn fn -> :ok end
 
     Endpoint.broadcast_from(some, "sometopic", "event1", %{key: :val})
@@ -169,6 +173,13 @@ defmodule Phoenix.Endpoint.EndpointTest do
     Endpoint.local_broadcast("sometopic", "event3", %{key: :val})
     assert_receive %Phoenix.Socket.Broadcast{
       event: "event3", payload: %{key: :val}, topic: "sometopic"}
+  end
+
+  test "loads cache manifest from specified application" do
+    config = put_in(@config[:cache_static_manifest], {:phoenix, "../../../../test/fixtures/digest/compile/cache_manifest.json"})
+    
+    assert Endpoint.config_change([{Endpoint, config}], []) == :ok
+    assert Endpoint.static_path("/foo.css") == "/foo-d978852bea6530fcd197b5445ed008fd.css?vsn=d"
   end
 
   test "server?/2 returns true for explicitly true server", config do
@@ -222,5 +233,9 @@ defmodule Phoenix.Endpoint.EndpointTest do
     assert_raise ArgumentError, ~r/expected a path starting with a single/, fn ->
       Endpoint.static_integrity("//invalid_path")
     end
+  end
+
+  test "__compile_config__/0 returns selected configs from compile time" do
+    assert Endpoint.__compile_config__() == [force_ssl: [subdomains: true]]
   end
 end

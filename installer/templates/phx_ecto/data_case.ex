@@ -1,4 +1,4 @@
-defmodule <%= app_module %>.DataCase do
+defmodule <%= @app_module %>.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
   access to the application's data layer.
@@ -7,31 +7,28 @@ defmodule <%= app_module %>.DataCase do
   your tests.
 
   Finally, if the test case interacts with the database,
-  it cannot be async. For this reason, every test runs
-  inside a transaction which is reset at the beginning
-  of the test unless the test case is marked as async.
+  we enable the SQL sandbox, so changes done to the database
+  are reverted at the end of every test. If you are using
+  PostgreSQL, you can even run database tests asynchronously
+  by setting `use <%= @app_module %>.DataCase, async: true`, although
+  this option is not recommended for other databases.
   """
 
   use ExUnit.CaseTemplate
 
   using do
     quote do
-      alias <%= app_module %>.Repo
+      alias <%= @app_module %>.Repo
 
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
-      import <%= app_module %>.DataCase
+      import <%= @app_module %>.DataCase
     end
   end
 
   setup tags do
-    <%= adapter_config[:test_setup] %>
-
-    unless tags[:async] do
-      <%= adapter_config[:test_async] %>
-    end
-
+<%= @adapter_config[:test_setup] %>
     :ok
   end
 

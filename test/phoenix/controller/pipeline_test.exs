@@ -7,9 +7,14 @@ defmodule Phoenix.Controller.PipelineTest do
   defmodule MyController do
     use Phoenix.Controller
 
+    @secret_actions [:secret]
+
     plug :prepend, :before1 when action in [:show, :create, :secret]
     plug :prepend, :before2
-    plug :do_halt when action in [:secret]
+    plug :do_halt when action in @secret_actions
+
+    # Delete the attribute to verify attributes in guards are expanded at call time
+    Module.delete_attribute(__MODULE__, :secret_actions)
 
     def show(conn, _) do
       prepend(conn, :action)
@@ -42,6 +47,12 @@ defmodule Phoenix.Controller.PipelineTest do
     defp prepend(conn, val) do
       update_in conn.private.stack, &[val|&1]
     end
+  end
+
+  defmodule NoViewsController do
+    use Phoenix.Controller, put_default_views: false
+
+    def show(conn, _), do: conn
   end
 
   defmodule FallbackFunctionController do
@@ -91,6 +102,7 @@ defmodule Phoenix.Controller.PipelineTest do
 
     defp put_assign(conn, _), do: assign(conn, :value_before_action, :a_value)
   end
+
   def init(opts), do: opts
   def call(conn, :not_a_conn), do: Plug.Conn.send_resp(conn, 200, "fallback")
   def call(_conn, :bad_fallback), do: :bad_fallback
@@ -123,6 +135,15 @@ defmodule Phoenix.Controller.PipelineTest do
            |> put_view(Hello)
            |> put_layout(false)
            |> MyController.call(:create)
+    assert view_module(conn) == Hello
+    assert layout(conn) == false
+  end
+
+  test "does not set default view/layout" do
+    conn = stack_conn()
+           |> NoViewsController.call(:show)
+           |> put_new_view(Hello)
+
     assert view_module(conn) == Hello
     assert layout(conn) == false
   end

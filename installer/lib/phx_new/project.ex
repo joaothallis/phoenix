@@ -39,6 +39,18 @@ defmodule Phx.New.Project do
     Keyword.fetch!(binding, :html)
   end
 
+  def gettext?(%Project{binding: binding}) do
+    Keyword.fetch!(binding, :gettext)
+  end
+
+  def live?(%Project{binding: binding}) do
+    Keyword.fetch!(binding, :live)
+  end
+
+  def dashboard?(%Project{binding: binding}) do
+    Keyword.fetch!(binding, :dashboard)
+  end
+
   def webpack?(%Project{binding: binding}) do
     Keyword.fetch!(binding, :webpack)
   end
@@ -57,7 +69,7 @@ defmodule Phx.New.Project do
   end
 
   defp expand_path_with_bindings(path, %Project{} = project) do
-    Regex.replace(Mix.Tasks.Phx.New.recompile(~r/:[a-zA-Z0-9_]+/), path, fn ":" <> key, _ ->
+    Regex.replace(Regex.recompile!(~r/:[a-zA-Z0-9_]+/), path, fn ":" <> key, _ ->
         project |> Map.fetch!(:"#{key}") |> to_string()
     end)
   end

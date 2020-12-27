@@ -5,13 +5,12 @@ defmodule Phoenix.Endpoint.Supervisor do
 
   require Logger
   use Supervisor
-  alias Phoenix.Endpoint.{CowboyAdapter, Cowboy2Adapter}
 
   @doc """
   Starts the endpoint supervision tree.
   """
-  def start_link(otp_app, mod) do
-    case Supervisor.start_link(__MODULE__, {otp_app, mod}, name: mod) do
+  def start_link(otp_app, mod, opts \\ []) do
+    case Supervisor.start_link(__MODULE__, {otp_app, mod, opts}, name: mod) do
       {:ok, _} = ok ->
         warmup(mod)
         log_access_info(otp_app, mod)
@@ -22,9 +21,46 @@ defmodule Phoenix.Endpoint.Supervisor do
     end
   end
 
+  defp check_compile_configs!(mod, runtime_configs) do
+    compile_configs = mod.__compile_config__()
+
+    bad_keys =
+      Enum.filter(Phoenix.Endpoint.Supervisor.compile_config_keys(), fn key ->
+        compile_config = Keyword.get(compile_configs, key)
+        runtime_config = Keyword.get(runtime_configs, key)
+
+        if compile_config != runtime_config do
+          require Logger
+
+          Logger.error("""
+          #{inspect(key)} mismatch for #{inspect(mod)}.
+
+          Compile time configuration: #{inspect(compile_config)}
+          Runtime configuration     : #{inspect(runtime_config)}
+
+          #{inspect(key)} is a compile-time configuration, so setting
+          it at runtime has no effect. Therefore you must set it in your
+          config/prod.exs or similar (not in your config/releases.exs)
+          and make sure the value doesn't change.
+          """)
+
+          true
+        else
+          false
+        end
+      end)
+
+    unless Enum.empty?(bad_keys) do
+      raise ArgumentError,
+            "expected these options to be unchanged from compile time: #{inspect(bad_keys)}"
+    end
+
+    :ok
+  end
+
   @doc false
-  def init({otp_app, mod}) do
-    default_conf = defaults(otp_app, mod)
+  def init({otp_app, mod, opts}) do
+    default_conf = Phoenix.Config.merge(defaults(otp_app, mod), opts)
     env_conf = config(otp_app, mod, default_conf)
 
     secret_conf =
@@ -41,7 +77,7 @@ defmodule Phoenix.Endpoint.Supervisor do
       end
 
     extra_conf = [
-      endpoint_id: :crypto.strong_rand_bytes(16) |> Base.encode64,
+      endpoint_id: :crypto.strong_rand_bytes(16) |> Base.encode64(padding: false),
       # TODO: Remove this once :pubsub is removed
       pubsub_server: secret_conf[:pubsub_server] || secret_conf[:pubsub][:name]
     ]
@@ -52,6 +88,7 @@ defmodule Phoenix.Endpoint.Supervisor do
     # Drop all secrets from secret_conf before passing it around
     conf = Keyword.drop(secret_conf, [:secret_key_base])
     server? = server?(conf)
+    check_compile_configs!(mod, conf)
 
     if conf[:instrumenters] do
       Logger.warn(":instrumenters configuration for #{inspect(mod)} is deprecated and has no effect")
@@ -110,58 +147,12 @@ defmodule Phoenix.Endpoint.Supervisor do
 
   defp server_children(mod, config, server?) do
     if server? do
-      user_adapter = user_adapter(mod, config)
-      autodetected_adapter = cowboy_version_adapter()
-      warn_on_different_adapter_version(user_adapter, autodetected_adapter, mod)
-      (user_adapter || autodetected_adapter).child_specs(mod, config)
+      adapter = config[:adapter] || Phoenix.Endpoint.Cowboy2Adapter
+      adapter.child_specs(mod, config)
     else
       []
     end
   end
-
-  defp user_adapter(endpoint, config) do
-    case config[:handler] do
-      nil ->
-        config[:adapter]
-
-      Phoenix.Endpoint.CowboyHandler ->
-        Logger.warn "Phoenix.Endpoint.CowboyHandler is deprecated, please use Phoenix.Endpoint.CowboyAdapter instead"
-        CowboyAdapter
-
-      other ->
-        Logger.warn "The :handler option in #{inspect endpoint} is deprecated, please use :adapter instead"
-        other
-    end
-  end
-
-  defp cowboy_version_adapter() do
-    case Application.spec(:cowboy, :vsn) do
-      [?1 | _] -> CowboyAdapter
-      _ -> Cowboy2Adapter
-    end
-  end
-
-  defp warn_on_different_adapter_version(CowboyAdapter, Cowboy2Adapter, endpoint) do
-    Logger.error("""
-    You have specified #{inspect CowboyAdapter} for Cowboy v1.x \
-    in the :adapter configuration of your Phoenix endpoint #{inspect endpoint} \
-    but your mix.exs has fetched Cowboy v2.x.
-
-    If you wish to use Cowboy 1, please update mix.exs to point to the \
-    correct Cowboy version:
-
-        {:plug_cowboy, "~> 1.0"}
-
-    If you want to use Cowboy 2, then please remove the :adapter option \
-    in your config.exs file or set it to:
-
-        adapter: Phoenix.Endpoint.Cowboy2Adapter
-
-    """)
-
-    raise "aborting due to adapter mismatch"
-  end
-  defp warn_on_different_adapter_version(_user, _autodetected, _endpoint), do: :ok
 
   defp watcher_children(_mod, conf, server?) do
     if server? do
@@ -294,10 +285,9 @@ defmodule Phoenix.Endpoint.Supervisor do
   end
 
   defp build_url(endpoint, url) do
-    build_url(endpoint.config(:https), endpoint.config(:http), url)
-  end
+    https = endpoint.config(:https)
+    http  = endpoint.config(:http)
 
-  defp build_url(https, http, url) do
     {scheme, port} =
       cond do
         https ->
@@ -311,6 +301,10 @@ defmodule Phoenix.Endpoint.Supervisor do
     scheme = url[:scheme] || scheme
     host   = host_to_binary(url[:host] || "localhost")
     port   = port_to_integer(url[:port] || port)
+
+    if host =~ ~r"[^:]:\d" do
+      Logger.warn("url: [host: ...] configuration value #{inspect(host)} for #{inspect(endpoint)} is invalid")
+    end
 
     %URI{scheme: scheme, port: port, host: host}
   end
@@ -372,9 +366,9 @@ defmodule Phoenix.Endpoint.Supervisor do
   Invoked to warm up caches on start and config change.
   """
   def warmup(endpoint) do
-    endpoint.host
+    endpoint.host()
+    endpoint.script_name()
     endpoint.path("/")
-    endpoint.script_name
     warmup_url(endpoint)
     warmup_static(endpoint)
     :ok
@@ -383,9 +377,9 @@ defmodule Phoenix.Endpoint.Supervisor do
   end
 
   defp warmup_url(endpoint) do
-    endpoint.url
-    endpoint.static_url
-    endpoint.struct_url
+    endpoint.url()
+    endpoint.static_url()
+    endpoint.struct_url()
   end
 
   defp warmup_static(endpoint) do
@@ -394,6 +388,8 @@ defmodule Phoenix.Endpoint.Supervisor do
   end
 
   defp warmup_static(endpoint, %{"latest" => latest, "digests" => digests}) do
+    Phoenix.Config.put_new(endpoint, :cache_static_manifest_latest, latest)
+
     Enum.each(latest, fn {key, _} ->
       Phoenix.Config.cache(endpoint, {:__phoenix_static__, "/" <> key}, fn _ ->
         {:cache, static_cache(digests, Map.get(latest, key))}
@@ -414,7 +410,14 @@ defmodule Phoenix.Endpoint.Supervisor do
 
   defp cache_static_manifest(endpoint) do
     if inner = endpoint.config(:cache_static_manifest) do
-      outer = Application.app_dir(endpoint.config(:otp_app), inner)
+      {app, inner} =
+        case inner do
+          {_, _} = inner -> inner
+          inner when is_binary(inner) -> {endpoint.config(:otp_app), inner}
+          _ -> raise ArgumentError, ":cache_static_manifest must be a binary or a tuple"
+        end
+
+      outer = Application.app_dir(app, inner)
 
       if File.exists?(outer) do
         outer |> File.read!() |> Phoenix.json_library().decode!()
@@ -432,5 +435,15 @@ defmodule Phoenix.Endpoint.Supervisor do
     if Phoenix.Endpoint.server?(otp_app, endpoint) do
       Logger.info("Access #{inspect(endpoint)} at #{endpoint.url()}")
     end
+  end
+
+  @doc """
+  List of keys which we ensure are unchanged from compile time to runtime. For
+  example, the :force_ssl option must be available at compile time in order to
+  work properly. We check these keys so we can warn the user that changing the
+  option at runtime may lead to undesirable behavior.
+  """
+  def compile_config_keys do
+    [:force_ssl]
   end
 end

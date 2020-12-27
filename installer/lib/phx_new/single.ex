@@ -7,7 +7,7 @@ defmodule Phx.New.Single do
     {:eex,  "phx_single/config/config.exs",             :project, "config/config.exs"},
     {:eex,  "phx_single/config/dev.exs",                :project, "config/dev.exs"},
     {:eex,  "phx_single/config/prod.exs",               :project, "config/prod.exs"},
-    {:eex,  "phx_single/config/prod.secret.exs",        :project, "config/prod.secret.exs"},
+    {:eex,  "phx_single/config/runtime.exs",            :project, "config/runtime.exs"},
     {:eex,  "phx_single/config/test.exs",               :project, "config/test.exs"},
     {:eex,  "phx_single/lib/app_name/application.ex",   :project, "lib/:app/application.ex"},
     {:eex,  "phx_single/lib/app_name.ex",               :project, "lib/:app.ex"},
@@ -17,6 +17,7 @@ defmodule Phx.New.Single do
     {:eex,  "phx_web/views/error_view.ex",              :project, "lib/:lib_web_name/views/error_view.ex"},
     {:eex,  "phx_web/endpoint.ex",                      :project, "lib/:lib_web_name/endpoint.ex"},
     {:eex,  "phx_web/router.ex",                        :project, "lib/:lib_web_name/router.ex"},
+    {:eex,  "phx_web/telemetry.ex",                     :project, "lib/:lib_web_name/telemetry.ex"},
     {:eex,  "phx_single/lib/app_name_web.ex",           :project, "lib/:lib_web_name.ex"},
     {:eex,  "phx_single/mix.exs",                       :project, "mix.exs"},
     {:eex,  "phx_single/README.md",                     :project, "README.md"},
@@ -47,6 +48,17 @@ defmodule Phx.New.Single do
     {:eex, "phx_test/views/page_view_test.exs",              :project, "test/:lib_web_name/views/page_view_test.exs"},
   ]
 
+  template :live, [
+    {:eex, "phx_live/templates/layout/root.html.leex",       :project, "lib/:lib_web_name/templates/layout/root.html.leex"},
+    {:eex, "phx_live/templates/layout/app.html.leex",        :project, "lib/:lib_web_name/templates/layout/app.html.eex"},
+    {:eex, "phx_live/templates/layout/live.html.leex",       :project, "lib/:lib_web_name/templates/layout/live.html.leex"},
+    {:eex, "phx_web/views/layout_view.ex",                   :project, "lib/:lib_web_name/views/layout_view.ex"},
+    {:eex, "phx_live/live/page_live.ex",                     :project, "lib/:lib_web_name/live/page_live.ex"},
+    {:eex, "phx_web/templates/page/index.html.eex",          :project, "lib/:lib_web_name/live/page_live.html.leex"},
+    {:eex, "phx_test/views/layout_view_test.exs",            :project, "test/:lib_web_name/views/layout_view_test.exs"},
+    {:eex, "phx_test/live/page_live_test.exs",               :project, "test/:lib_web_name/live/page_live_test.exs"},
+  ]
+
   template :ecto, [
     {:eex,  "phx_ecto/repo.ex",              :app, "lib/:app/repo.ex"},
     {:keep, "phx_ecto/priv/repo/migrations", :app, "priv/repo/migrations"},
@@ -59,7 +71,17 @@ defmodule Phx.New.Single do
     {:eex,  "phx_assets/webpack.config.js", :web, "assets/webpack.config.js"},
     {:text, "phx_assets/babelrc",           :web, "assets/.babelrc"},
     {:eex,  "phx_assets/app.js",            :web, "assets/js/app.js"},
+    {:eex,  "phx_assets/app.scss",          :web, "assets/css/app.scss"},
     {:eex,  "phx_assets/socket.js",         :web, "assets/js/socket.js"},
+    {:eex,  "phx_assets/package.json",      :web, "assets/package.json"},
+    {:keep, "phx_assets/vendor",            :web, "assets/vendor"},
+  ]
+
+  template :webpack_live, [
+    {:eex,  "phx_assets/webpack.config.js", :web, "assets/webpack.config.js"},
+    {:text, "phx_assets/babelrc",           :web, "assets/.babelrc"},
+    {:eex,  "phx_assets/app.js",            :web, "assets/js/app.js"},
+    {:eex,  "phx_assets/app.scss",          :web, "assets/css/app.scss"},
     {:eex,  "phx_assets/package.json",      :web, "assets/package.json"},
     {:keep, "phx_assets/vendor",            :web, "assets/vendor"},
   ]
@@ -104,11 +126,19 @@ defmodule Phx.New.Single do
   end
 
   def generate(%Project{} = project) do
+    if Project.live?(project), do: assert_live_switches!(project)
+
     copy_from project, __MODULE__, :new
-    copy_from project, __MODULE__, :gettext
 
     if Project.ecto?(project), do: gen_ecto(project)
-    if Project.html?(project), do: gen_html(project)
+
+    cond do
+      Project.live?(project) -> gen_live(project)
+      Project.html?(project) -> gen_html(project)
+      true -> :noop
+    end
+
+    if Project.gettext?(project), do: gen_gettext(project)
 
     case {Project.webpack?(project), Project.html?(project)} do
       {true, _}      -> gen_webpack(project)
@@ -123,6 +153,14 @@ defmodule Phx.New.Single do
     copy_from project, __MODULE__, :html
   end
 
+  def gen_gettext(project) do
+    copy_from project, __MODULE__, :gettext
+  end
+
+  defp gen_live(project) do
+    copy_from project, __MODULE__, :live
+  end
+
   def gen_ecto(project) do
     copy_from project, __MODULE__, :ecto
     gen_ecto_config(project)
@@ -133,10 +171,13 @@ defmodule Phx.New.Single do
   end
 
   def gen_webpack(%Project{web_path: web_path} = project) do
-    copy_from project, __MODULE__, :webpack
+    if Project.live?(project) do
+      copy_from project, __MODULE__, :webpack_live
+    else
+      copy_from project, __MODULE__, :webpack
+    end
 
     statics = %{
-      "phx_static/app.css" => "assets/css/app.css",
       "phx_static/phoenix.css" => "assets/css/phoenix.css",
       "phx_static/robots.txt" => "assets/static/robots.txt",
       "phx_static/phoenix.png" => "assets/static/images/phoenix.png",
@@ -144,11 +185,17 @@ defmodule Phx.New.Single do
     }
 
     for {source, target} <- statics do
-      create_file Path.join(web_path, target), render(:static, source)
+      create_file Path.join(web_path, target), render(:static, source, project.binding)
     end
   end
 
   def gen_bare(%Project{} = project) do
     copy_from project, __MODULE__, :bare
+  end
+
+  def assert_live_switches!(project) do
+    unless Project.html?(project) and Project.webpack?(project) do
+      raise "cannot generate --live project with --no-html or --no-webpack. LiveView requires HTML and webpack"
+    end
   end
 end

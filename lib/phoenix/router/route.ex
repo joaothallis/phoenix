@@ -9,7 +9,7 @@ defmodule Phoenix.Router.Route do
   @doc """
   The `Phoenix.Router.Route` struct. It stores:
 
-    * `:verb` - the HTTP verb as an upcased string
+    * `:verb` - the HTTP verb as an atom
     * `:line` - the line the route was defined
     * `:kind` - the kind of route, one of `:match`, `:forward`
     * `:path` - the normalized path as string
@@ -20,12 +20,13 @@ defmodule Phoenix.Router.Route do
     * `:private` - the private route info
     * `:assigns` - the route info
     * `:pipe_through` - the pipeline names as a list of atoms
-    * `:log` - if we should log the matching of this route
-
+    * `:metadata` - general metadata used on telemetry events and route info
+    * `:trailing_slash?` - whether or not the helper functions append a trailing slash
   """
 
   defstruct [:verb, :line, :kind, :path, :host, :plug, :plug_opts,
-             :helper, :private, :pipe_through, :assigns, :log]
+             :helper, :private, :pipe_through, :assigns, :metadata,
+             :trailing_slash?]
 
   @type t :: %Route{}
 
@@ -45,16 +46,17 @@ defmodule Phoenix.Router.Route do
   Receives the verb, path, plug, options and helper
   and returns a `Phoenix.Router.Route` struct.
   """
-  @spec build(non_neg_integer, :match | :forward, String.t, String.t, String.t | nil, atom, atom, atom | nil, atom, %{}, %{}, atom) :: t
-  def build(line, kind, verb, path, host, plug, plug_opts, helper, pipe_through, private, assigns, log)
+  @spec build(non_neg_integer, :match | :forward, atom, String.t, String.t | nil, atom, atom, atom | nil, list(atom), map, map, map, boolean) :: t
+  def build(line, kind, verb, path, host, plug, plug_opts, helper, pipe_through, private, assigns, metadata, trailing_slash?)
       when is_atom(verb) and (is_binary(host) or is_nil(host)) and
            is_atom(plug) and (is_binary(helper) or is_nil(helper)) and
            is_list(pipe_through) and is_map(private) and is_map(assigns) and
-           is_atom(log) and kind in [:match, :forward] do
-
+           is_map(metadata) and kind in [:match, :forward] and
+           is_boolean(trailing_slash?) do
     %Route{kind: kind, verb: verb, path: path, host: host, private: private,
            plug: plug, plug_opts: plug_opts, helper: helper,
-           pipe_through: pipe_through, assigns: assigns, line: line, log: log}
+           pipe_through: pipe_through, assigns: assigns, line: line, metadata: metadata,
+           trailing_slash?: trailing_slash?}
   end
 
   @doc """

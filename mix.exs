@@ -1,34 +1,38 @@
 defmodule Phoenix.MixProject do
   use Mix.Project
 
-  @version "1.5.0-dev"
+  @version "1.6.0-dev"
+
+  # If the elixir requirement is updated, we need to make the installer
+  # use at least the minimum requirement used here. Although often the
+  # installer is ahead of Phoenix itself.
+  @elixir_requirement "~> 1.9"
 
   def project do
     [
       app: :phoenix,
       version: @version,
-      elixir:  "~> 1.6",
+      elixir: @elixir_requirement,
       deps: deps(),
       package: package(),
-      lockfile: lockfile(),
       preferred_cli_env: [docs: :docs],
-      consolidate_protocols: Mix.env != :test,
+      consolidate_protocols: Mix.env() != :test,
       xref: [
         exclude: [
+          {IEx, :started?, 0},
           Ecto.Type,
           :ranch,
-          {:cowboy_req, :compact, 1},
-          Plug.Adapters.Cowboy.Conn,
+          :cowboy_req,
           Plug.Cowboy.Conn,
           Plug.Cowboy
         ]
       ],
-      elixirc_paths: elixirc_paths(Mix.env),
+      elixirc_paths: elixirc_paths(Mix.env()),
       name: "Phoenix",
       docs: docs(),
       aliases: aliases(),
       source_url: "https://github.com/phoenixframework/phoenix",
-      homepage_url: "http://www.phoenixframework.org",
+      homepage_url: "https://www.phoenixframework.org",
       description: """
       Productive. Reliable. Fast. A productive web framework that
       does not compromise speed or maintainability.
@@ -42,44 +46,41 @@ defmodule Phoenix.MixProject do
   def application do
     [
       mod: {Phoenix, []},
-      extra_applications: [:logger, :eex, :crypto],
+      extra_applications: [:logger, :eex, :crypto, :public_key],
       env: [
+        logger: true,
         stacktrace_depth: nil,
-        template_engines: [],
-        format_encoders: [],
         filter_parameters: ["password"],
         serve_endpoints: false,
-        gzippable_exts: ~w(.js .css .txt .text .html .json .svg .eot .ttf)
+        gzippable_exts: ~w(.js .css .txt .text .html .json .svg .eot .ttf),
+        static_compressors: [Phoenix.Digester.Gzip]
       ]
     ]
   end
 
   defp deps do
     [
-      {:plug, "~> 1.8.1 or ~> 1.9"},
+      {:plug, "~> 1.10"},
+      {:plug_crypto, "~> 1.1.2 or ~> 1.2"},
       {:telemetry, "~> 0.4"},
-      {:phoenix_pubsub, "~> 2.0-dev", github: "phoenixframework/phoenix_pubsub"},
+      {:phoenix_pubsub, "~> 2.0"},
 
       # Optional deps
-      {:plug_cowboy, "~> 1.0 or ~> 2.1", optional: true},
+      {:plug_cowboy, "~> 2.2", optional: true},
       {:jason, "~> 1.0", optional: true},
-      {:phoenix_html, "~> 2.13", optional: true},
+      {:phoenix_view, git: "https://github.com/phoenixframework/phoenix_view.git"},
+      {:phoenix_html, "~> 2.14.2 or ~> 3.0", optional: true},
 
-      # Docs dependencies
-      {:ex_doc, "~> 0.20", only: :docs},
-      {:inch_ex, "~> 0.2", only: :docs},
+      # Docs dependencies (some for cross references)
+      {:ex_doc, "~> 0.22", only: :docs},
+      {:ecto, ">= 3.0.0", only: :docs},
+      {:gettext, "~> 0.15.0", only: :docs},
+      {:telemetry_poller, "~> 0.4", only: :docs},
+      {:telemetry_metrics, "~> 0.4", only: :docs},
 
       # Test dependencies
-      {:gettext, "~> 0.15.0", only: :test},
       {:websocket_client, git: "https://github.com/jeremyong/websocket_client.git", only: :test}
     ]
-  end
-
-  defp lockfile() do
-    case System.get_env("COWBOY_VERSION") do
-      "1" <> _ -> "mix-cowboy1.lock"
-      _ -> "mix.lock"
-    end
   end
 
   defp package do
@@ -87,7 +88,8 @@ defmodule Phoenix.MixProject do
       maintainers: ["Chris McCord", "José Valim", "Gary Rennie", "Jason Stiebs"],
       licenses: ["MIT"],
       links: %{github: "https://github.com/phoenixframework/phoenix"},
-      files: ~w(lib priv CHANGELOG.md LICENSE.md mix.exs package.json README.md .formatter.exs)
+      files:
+        ~w(assets/js lib priv CHANGELOG.md LICENSE.md mix.exs package.json README.md .formatter.exs)
     ]
   end
 
@@ -109,41 +111,43 @@ defmodule Phoenix.MixProject do
     [
       "guides/introduction/overview.md",
       "guides/introduction/installation.md",
-      "guides/introduction/learning.md",
+      "guides/introduction/up_and_running.md",
       "guides/introduction/community.md",
-
-      "guides/up_and_running.md",
-      "guides/adding_pages.md",
-      "guides/routing.md",
+      "guides/directory_structure.md",
+      "guides/request_lifecycle.md",
       "guides/plug.md",
-      "guides/endpoint.md",
+      "guides/routing.md",
       "guides/controllers.md",
       "guides/views.md",
-      "guides/templates.md",
-      "guides/channels.md",
-      "guides/presence.md",
       "guides/ecto.md",
       "guides/contexts.md",
-      "guides/phoenix_mix_tasks.md",
-      "guides/errors.md",
-
+      "guides/mix_tasks.md",
+      "guides/telemetry.md",
+      "guides/authentication/mix_phx_gen_auth.md",
+      "guides/realtime/channels.md",
+      "guides/realtime/presence.md",
       "guides/testing/testing.md",
-      "guides/testing/testing_schemas.md",
+      "guides/testing/testing_contexts.md",
       "guides/testing/testing_controllers.md",
       "guides/testing/testing_channels.md",
-
       "guides/deployment/deployment.md",
       "guides/deployment/releases.md",
-      "guides/deployment/heroku.md"
-      ]
+      "guides/deployment/gigalixir.md",
+      "guides/deployment/heroku.md",
+      "guides/howto/custom_error_pages.md",
+      "guides/howto/using_ssl.md"
+    ]
   end
 
   defp groups_for_extras do
     [
-      "Introduction": ~r/guides\/introduction\/.?/,
-      "Guides": ~r/guides\/[^\/]+\.md/,
-      "Testing": ~r/guides\/testing\/.?/,
-      "Deployment": ~r/guides\/deployment\/.?/
+      Introduction: ~r/guides\/introduction\/.?/,
+      Guides: ~r/guides\/[^\/]+\.md/,
+      Authentication: ~r/guides\/authentication\/.?/,
+      "Real-time components": ~r/guides\/realtime\/.?/,
+      Testing: ~r/guides\/testing\/.?/,
+      Deployment: ~r/guides\/deployment\/.?/,
+      "How-to's": ~r/guides\/howto\/.?/
     ]
   end
 
@@ -163,17 +167,14 @@ defmodule Phoenix.MixProject do
     # Phoenix.View
 
     [
-      "Testing": [
+      Testing: [
         Phoenix.ChannelTest,
-        Phoenix.ConnTest,
+        Phoenix.ConnTest
       ],
-
       "Adapters and Plugs": [
         Phoenix.CodeReloader,
-        Phoenix.Endpoint.CowboyAdapter,
         Phoenix.Endpoint.Cowboy2Adapter
       ],
-
       "Socket and Transport": [
         Phoenix.Socket,
         Phoenix.Socket.Broadcast,
@@ -182,13 +183,12 @@ defmodule Phoenix.MixProject do
         Phoenix.Socket.Serializer,
         Phoenix.Socket.Transport
       ],
-
-      "Templating": [
+      Templating: [
         Phoenix.Template,
         Phoenix.Template.EExEngine,
         Phoenix.Template.Engine,
-        Phoenix.Template.ExsEngine,
-      ],
+        Phoenix.Template.ExsEngine
+      ]
     ]
   end
 
@@ -199,7 +199,7 @@ defmodule Phoenix.MixProject do
   end
 
   def generate_js_docs(_) do
-    Mix.Task.run "app.start"
+    Mix.Task.run("app.start")
     System.cmd("npm", ["run", "docs"], cd: "assets")
   end
 end

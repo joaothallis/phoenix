@@ -2,12 +2,6 @@
 # process to avoid polluting tests.
 Mix.shell(Mix.Shell.Process)
 
-# Mock live reloading for testing the generated application.
-defmodule Phoenix.LiveReloader do
-  def init(opts), do: opts
-  def call(conn, _), do: conn
-end
-
 defmodule MixHelper do
   import ExUnit.Assertions
   import ExUnit.CaptureIO
@@ -61,8 +55,8 @@ defmodule MixHelper do
       File.mkdir_p!(apps_path)
       File.mkdir_p!(config_path)
       File.touch!(Path.join(path, "mix.exs"))
-      for file <- ~w(config.exs dev.exs test.exs prod.exs prod.secret.exs) do
-        File.write!(Path.join(config_path, file), "use Mix.Config\n")
+      for file <- ~w(config.exs dev.exs test.exs prod.exs) do
+        File.write!(Path.join(config_path, file), "import Config\n")
       end
       File.cd!(apps_path, function)
     after

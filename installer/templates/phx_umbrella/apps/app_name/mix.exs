@@ -1,15 +1,15 @@
-defmodule <%= app_module %>.MixProject do
+defmodule <%= @app_module %>.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :<%= app_name %>,
+      app: :<%= @app_name %>,
       version: "0.1.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
-      elixir: "~> 1.5",
+      elixir: "~> 1.11",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -22,7 +22,7 @@ defmodule <%= app_module %>.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {<%= app_module %>.Application, []},
+      mod: {<%= @app_module %>.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -36,24 +36,22 @@ defmodule <%= app_module %>.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:phoenix_pubsub, "~> 2.0"}<%= if ecto do %>,
-      {:ecto_sql, "~> 3.1"},
-      {:<%= adapter_app %>, ">= 0.0.0"},
-      {:jason, "~> 1.0"}
-    <% end %>]
+      {:phoenix_pubsub, "~> 2.0"}<%= if @ecto do %>,
+      {:ecto_sql, "~> 3.5"},
+      {:<%= @adapter_app %>, ">= 0.0.0"},
+      {:jason, "~> 1.0"}<% end %>
+    ]
   end
 
-  # Aliases are shortcuts or tasks specific to the current project.<%= if ecto do %>
-  # For example, to create, migrate and run the seeds file at once:
-  #
-  #     $ mix ecto.setup<% end %>
+  # Aliases are shortcuts or tasks specific to the current project.
   #
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
-    [<%= if ecto do %>
+    [
+      setup: ["deps.get"<%= if @ecto do %>, "ecto.setup"<% end %>]<%= if @ecto do %>,
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate", "test"]
-    <% end %>]
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]<% end %>
+    ]
   end
 end

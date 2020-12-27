@@ -1,11 +1,16 @@
 # Contexts
 
+> **Requirement**: This guide expects that you have gone through the introductory guides and got a Phoenix application up and running.
+
+> **Requirement**: This guide expects that you have gone through [the Request life-cycle guide](request_lifecycle.html).
+
+> **Requirement**: This guide expects that you have gone through [the Ecto guide](ecto.html).
+
 So far, we've built pages, wired up controller actions through our routers, and learned how Ecto allows data to be validated and persisted. Now it's time to tie it all together by writing web-facing features that interact with our greater Elixir application.
 
 When building a Phoenix project, we are first and foremost building an Elixir application. Phoenix's job is to provide a web interface into our Elixir application. Naturally, we compose our applications with modules and functions, but simply defining a module with a few functions isn't enough when designing an application. It's vital to think about your application design when writing code. Let's find out how.
 
-> How to read this guide:
-Using the context generators is a great way for beginners and intermediate Elixir programmers alike to get up and running quickly while thoughtfully designing their applications. This guide focuses on those readers. On the other hand, experienced developers may get more mileage from nuanced discussions around application design. For those readers, we include a frequently asked questions (FAQ) section at the end of the guide which brings different perspectives to some design decisions made throughout the guide. Beginners can safely skip the FAQ sections and return later when they're ready to dig deeper.
+> How to read this guide: Using the context generators is a great way for beginners and intermediate Elixir programmers alike to get up and running quickly while thoughtfully designing their applications. This guide focuses on those readers. On the other hand, experienced developers may get more mileage from nuanced discussions around application design. For those readers, we include a frequently asked questions (FAQ) section at the end of the guide which brings different perspectives to some design decisions made throughout the guide. Beginners can safely skip the FAQ sections and return later when they're ready to dig deeper.
 
 ## Thinking about design
 
@@ -19,7 +24,7 @@ Let's use these ideas to build out our web application. Our goal is to build a u
 
 User accounts are often wide-reaching across a platform so it's important to think upfront about writing a well-defined interface. With that in mind, our goal is to build an accounts API that handles creating, updating, and deleting user accounts, as well as authenticating user credentials. We'll start off with basic features, but as we add authentication later, we'll see how starting with a solid foundation allows us to grow our application naturally as we add functionality.
 
-Phoenix includes the `phx.gen.html`, `phx.gen.json`, and `phx.gen.context` generators that apply the ideas of isolating functionality in our applications into contexts. These generators are a great way to hit the ground running while Phoenix nudges you in the right direction to grow your application. Let's put these tools to use for our new user accounts context.
+Phoenix includes the `mix phx.gen.html`, `mix phx.gen.json`, `mix phx.gen.live`, and `mix phx.gen.context` generators that apply the ideas of isolating functionality in our applications into contexts. These generators are a great way to hit the ground running while Phoenix nudges you in the right direction to grow your application. Let's put these tools to use for our new user accounts context.
 
 In order to run the context generators, we need to come up with a module name that groups the related functionality that we're building. In the [Ecto guide](ecto.html), we saw how we can use Changesets and Repos to validate and persist user schemas, but we didn't integrate this with our application at large. In fact, we didn't think about where a "user" in our application should live at all. Let's take a step back and think about the different parts of our system. We know that we'll have users of our product. Along with users comes things like account login credentials and user registration. An `Accounts` context in our system is a natural place for our user functionality to live.
 
@@ -40,10 +45,10 @@ Generated hello app
 The database for Hello.Repo has been dropped
 The database for Hello.Repo has been created
 
-14:38:37.418 [info]  Already up
+14:38:37.418 [info]  Migrations already up
 ```
 
-Now we're ready to create our accounts context. We'll use the `phx.gen.html` task which creates a context module that wraps up Ecto access for creating, updating, and deleting users, along with web files like controllers and templates for the web interface into our context. Run the following command at your project root:
+Now we're ready to create our accounts context. We'll use `mix phx.gen.html` which creates a context module that wraps up Ecto access for creating, updating, and deleting users, along with web files like controllers and templates for the web interface into our context. Run the following command at your project root:
 
 ```console
 $ mix phx.gen.html Accounts User users name:string \
@@ -120,7 +125,7 @@ If we follow the "Back" link, we get a list of all users, which should contain t
 
 ## Starting With Generators
 
-That little `phx.gen.html` command packed a surprising punch. We got a lot of functionality out-of-the-box for creating, updating, and deleting users. This is far from a full-featured app, but remember, generators are first and foremost learning tools and a starting point for you to begin building real features. Code generation can't solve all your problems, but it will teach you the ins and outs of Phoenix and nudge you towards the proper mind-set when designing your application.
+That little `mix phx.gen.html` command packed a surprising punch. We got a lot of functionality out-of-the-box for creating, updating, and deleting users. This is far from a full-featured app, but remember, generators are first and foremost learning tools and a starting point for you to begin building real features. Code generation can't solve all your problems, but it will teach you the ins and outs of Phoenix and nudge you towards the proper mind-set when designing your application.
 
 Let's first check out the `UserController` that was generated in `lib/hello_web/controllers/user_controller.ex`:
 
@@ -241,7 +246,7 @@ defmodule Hello.Accounts.User do
 end
 ```
 
-This is just what we saw before when we ran the `mix phx.gen.schema` task, except here we see a `@doc false` above our `changeset/2` function. This tells us that while this function is publicly callable, it's not part of the public context API. Callers that build changesets do so via the context API. For example, `Accounts.create_user/1` calls into our `User.changeset/2` to build the changeset from user input. Callers, such as our controller actions, do not access `User.changeset/2` directly. All interaction with our user changesets is done through the public `Accounts` context.
+This is just what we saw before when we ran `mix phx.gen.schema`, except here we see a `@doc false` above our `changeset/2` function. This tells us that while this function is publicly callable, it's not part of the public context API. Callers that build changesets do so via the context API. For example, `Accounts.create_user/1` calls into our `User.changeset/2` to build the changeset from user input. Callers, such as our controller actions, do not access `User.changeset/2` directly. All interaction with our user changesets is done through the public `Accounts` context.
 
 ## In-context Relationships
 
@@ -265,7 +270,7 @@ Remember to update your repository by running migrations:
     $ mix ecto.migrate
 ```
 
-This time around, we used the `phx.gen.context` task, which is just like `phx.gen.html`, except it doesn't generate the web files for us. Since we already have controllers and templates for managing users, we can integrate the new credential features into our existing web form.
+This time around, we used `mix phx.gen.context`, which is just like `mix phx.gen.html`, except it doesn't generate the web files for us. Since we already have controllers and templates for managing users, we can integrate the new credential features into our existing web form.
 
 We can see from the output that Phoenix generated an `accounts/credential.ex` file for our `Accounts.Credential` schema, as well as a migration. Notably, phoenix said it was `* injecting` code into the existing `accounts.ex` context file and test file. Since our `Accounts` module already exists, Phoenix knows to inject our code here.
 
@@ -363,7 +368,7 @@ We rewrote the `list_users/0` and `get_user!/1` to preload the credential associ
 Next, let's expose our new feature to the web by adding the credentials input to our user form. Open up `lib/hello_web/templates/user/form.html.eex` and key in the new credential form group above the submit button:
 
 
-```eex
+```html
   ...
 + <div class="form-group">
 +   <%= inputs_for f, :credential, fn cf -> %>
@@ -380,7 +385,7 @@ We used `Phoenix.HTML`'s `inputs_for` function to add an associations nested fie
 
 Next, let's show the user's email address in the user show template. Add the following code to `lib/hello_web/templates/user/show.html.eex`:
 
-```eex
+```html
   ...
 + <li>
 +   <strong>Email:</strong>
@@ -490,7 +495,7 @@ defmodule HelloWeb.SessionController do
 end
 ```
 
-We defined a `SessionController` to handle users signing in and out of the application. Our `new` action is responsible for simply rendering a "new session" form, which posts out to the create action of our controller. In `create`, we pattern match the form fields and call into our `Accounts.authenticate_by_email_password/2` that we just defined. If successful, we use `Plug.Conn.put_session/3` to place the authenticated user's ID in the session, and redirect to the home page with a successful welcome message. We also called `configure_session(conn, renew: true)` before redirecting to avoid [session fixation attacks](https://www.owasp.org/index.php/Session_fixation). If authentication fails, we add a flash error message, and redirect to the sign-in page for the user to try again. To finish the controller, we support a `delete` action which simply calls `Plug.Conn.configure_session/2` to drop the session and redirect to the home page.
+We defined a `SessionController` to handle users signing in and out of the application. Our `new` action is responsible for simply rendering a "new session" form, which posts out to the create action of our controller. In `create`, we pattern match the form fields and call into our `Accounts.authenticate_by_email_password/2` that we just defined. If successful, we use `Plug.Conn.put_session/3` to place the authenticated user's ID in the session, and redirect to the home page with a successful welcome message. We also called `configure_session(conn, renew: true)` before redirecting to avoid [session fixation attacks](https://owasp.org/www-community/attacks/Session_fixation). If authentication fails, we add a flash error message, and redirect to the sign-in page for the user to try again. To finish the controller, we support a `delete` action which simply calls `Plug.Conn.configure_session/2` to drop the session and redirect to the home page.
 
 Next, let's wire up our session routes in `lib/hello_web/router.ex`:
 
@@ -506,7 +511,7 @@ Next, let's wire up our session routes in `lib/hello_web/router.ex`:
   end
 ```
 
-We used `resources` to generate a set of routes under the `"/session"` path. This is what we've done for other routes, except this time we also passed the `:only` option to limit which routes are generated, since we only need to support `:new`, `:create`, and `:delete` actions. We also used the `singleton: true` option, which defines all the RESTful routes, but does not require a resource ID to be passed along in the URL. We don't need an ID in the URL because our actions are always scoped to the "current" user in the system. The ID is always in the session. Before we finish our router, let's add an authentication plug to the router that will allow us to lock down certain routes after a user has used our new session controller to sign-in. Add the following function to `lib/hello_web/router.ex`:
+We used `resources` to generate a set of routes under the `"/sessions"` path. This is what we've done for other routes, except this time we also passed the `:only` option to limit which routes are generated, since we only need to support `:new`, `:create`, and `:delete` actions. We also used the `singleton: true` option, which defines all the RESTful routes, but does not require a resource ID to be passed along in the URL. We don't need an ID in the URL because our actions are always scoped to the "current" user in the system. The ID is always in the session. Before we finish our router, let's add an authentication plug to the router that will allow us to lock down certain routes after a user has used our new session controller to sign-in. Add the following function to `lib/hello_web/router.ex`:
 
 
 ```elixir
@@ -525,7 +530,7 @@ We used `resources` to generate a set of routes under the `"/session"` path. Thi
 
 We defined an `authenticate_user/2` plug in the router which simply uses `Plug.Conn.get_session/2` to check for a `:user_id` in the session. If we find one, it means a user has previously authenticated, and we call into `Hello.Accounts.get_user!/1` to place our `:current_user` into the connection assigns. If we don't have a session, we add a flash error message, redirect to the homepage, and we use `Plug.Conn.halt/1` to halt further plugs downstream from being invoked. We won't use this new plug quite yet, but it will be ready and waiting as we add authenticated routes in just a moment.
 
-Lastly, we need `SessionView` to render a template for our login form. Create a new file in `lib/hello_web/views/session_view.ex:`
+Lastly, we need `SessionView` to render a template for our login form. Create a new file in `lib/hello_web/views/session_view.ex`:
 
 ```elixir
 defmodule HelloWeb.SessionView do
@@ -533,9 +538,9 @@ defmodule HelloWeb.SessionView do
 end
 ```
 
-Next, add a new template in `lib/hello_web/templates/session/new.html.eex:`
+Next, add a new template in `lib/hello_web/templates/session/new.html.eex`:
 
-```eex
+```html
 <h1>Sign in</h1>
 
 <%= form_for @conn, Routes.session_path(@conn, :create), [method: :post, as: :user], fn f -> %>
@@ -618,7 +623,7 @@ Remember to update your repository by running migrations:
 
 The `views` attribute on the pages will not be updated directly by the user, so let's remove it from the generated form. Open `lib/hello_web/templates/cms/page/form.html.eex` and remove this part:
 
-```eex
+```html
 -  <%= label f, :views %>
 -  <%= number_input f, :views %>
 -  <%= error_tag f, :views %>
@@ -678,7 +683,7 @@ Generated hello app
 
 Now, let's fire up the server with `mix phx.server` and visit [http://localhost:4000/cms/pages](http://localhost:4000/cms/pages). If we haven't logged in yet, we'll be redirected to the home page with a flash error message telling us to sign in. Let's sign in at [http://localhost:4000/sessions/new](http://localhost:4000/sessions/new), then re-visit [http://localhost:4000/cms/pages](http://localhost:4000/cms/pages). Now that we're authenticated, we should see a familiar resource listing for pages, with a `New Page` link.
 
-Before we create any pages, we need page authors. Let's run the `phx.gen.context` generator to generate an `Author` schema along with injected context functions:
+Before we create any pages, we need page authors. Let's run the `mix phx.gen.context` generator to generate an `Author` schema along with injected context functions:
 
 ```
 $ mix phx.gen.context CMS Author authors bio:text role:string \
@@ -861,7 +866,7 @@ defp handle_existing_author({:error, changeset}) do
 end
 ```
 
-There's a bit of a code here, so let's break it down. First, we rewrote the `create_page` function to require a `CMS.Author` struct, which represents the author publishing the post. We then take our changeset and pass it to `Ecto.Changeset.put_change/2` to place the `author_id` association in the changeset. Next, we use `Repo.insert` to insert the new page into the database, containing our associated `author_id`.
+There's a bit of a code here, so let's break it down. First, we rewrote the `create_page` function to require a `CMS.Author` struct, which represents the author publishing the post. We then take our changeset and pass it to `Ecto.Changeset.put_change/3` to place the `author_id` association in the changeset. Next, we use `Repo.insert` to insert the new page into the database, containing our associated `author_id`.
 
 Our CMS system requires an author to exist for any end-user before they publish posts, so we added an `ensure_author_exists` function to programmatically allow authors to be created. Our new function accepts an `Accounts.User` struct and either finds the existing author in the application with that `user.id`, or creates a new author for the user. Our authors table has a unique constraint on the `user_id` foreign key, so we are protected from a race condition allowing duplicate authors. That said, we still need to protect ourselves from racing the insert of another user. To accomplish this, we use a purpose-built changeset with `Ecto.Changeset.change/1` which accepts a new `Author` struct with our `user_id`. The changeset's only purpose is to convert a unique constraint violation into an error we can handle. After attempting to insert the new author with `Repo.insert/1`, we pipe to `handle_existing_author/1` which matches on the success and error cases. For the success case, we are done and simply return the created author, otherwise we use `Repo.get_by!` to fetch the author for the `user_id` that already exists.
 
@@ -991,7 +996,7 @@ And it works! We now have two isolated contexts responsible for user accounts an
 
 ## Adding CMS functions
 
-Just like we extended our `Accounts` context with new application-specific functions like `Accounts.authenticate_by_email_password/2`, let's extend our generated `CMS` context with new functionality. For any CMS system, the ability to track how many times a page has been viewed is essential for popularity ranks. While we could try to use the existing `CMS.update_page` function, along the lines of `CMS.update_page(user, page, %{views: page.views + 1})`, this would not only be prone to race conditions, but it would also require the caller to know too much about our CMS system. To see why the race condition exists, let's walk through the possible execution of events:
+Just like we extended our `Accounts` context with new application-specific functions like `Accounts.authenticate_by_email_password/2`, let's extend our generated `CMS` context with new functionality. For any CMS system, the ability to track how many times a page has been viewed is essential for popularity ranks. While we could try to use the existing `CMS.update_page` function, along the lines of `CMS.update_page(page, %{views: page.views + 1})`, this would not only be prone to race conditions, but it would also require the caller to know too much about our CMS system. To see why the race condition exists, let's walk through the possible execution of events:
 
 Intuitively, you would assume the following events:
 
